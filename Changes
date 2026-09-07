@@ -1,0 +1,8 @@
+Revision history for NExT
+
+0.1.0 2026-09-07
+    - Initial release
+    - LL(1) recursive descent parser for Noun Expression Trees
+    - Noun/Adjective AST with source line tracking
+    - Value types: string, integer, float, boolean, symbol, nested object
+    - Zero dependencies, pure Perl

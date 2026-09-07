@@ -1,0 +1,371 @@
+NExT FORMAL SPECIFICATION
+==========================
+
+Status: specification. The formal grammar and semantics of the NExT
+(Noun Expression Tree) data description format.
+
+
+1. NAME
+-------
+
+The format is called "NExT" (Noun Expression Tree). It is a
+declarative, hierarchical data format designed for LL(1) single-pass
+parsing.
+
+File extension: .nx
+
+
+2. DESIGN PRINCIPLES
+---------------------
+
+NExT is built on two fundamental concepts:
+
+  Nouns represent types — entities, objects, or structural elements.
+  Adjectives represent attributes — properties or metadata of a noun.
+
+  - Purely declarative: no code, no logic, no Turing-complete expressions.
+  - LL(1): one-token lookahead determines the next parse action.
+  - Hierarchical: nouns nest. Adjectives are leaves.
+  - Two token classes: Nouns (CamelCase) and Adjectives (snake_case).
+  - Ground-truth values: adjectives hold Int, Float, String, Bool, or Symbol.
+  - Human-readable: plain text, versionable with git.
+  - LLM-generable: the grammar is simple enough for LLMs to produce valid output.
+
+
+3. GRAMMAR (EBNF)
+-------------------
+
+  document     ::= ( block )* EOF
+  block        ::= comment | noun
+  noun         ::= NOUN '[' content ']'
+  content      ::= ( block | adjective | comment )*     -- mixed, any order
+  adjective    ::= ADJECTIVE '(' value ')'
+  value        ::= string | integer | float | boolean | symbol | noun
+  comment      ::= '#' ( any )* newline
+
+  -- Lexical tokens
+
+  NOUN         ::= [A-Z] [a-zA-Z0-9_]*
+  ADJECTIVE    ::= [a-z] [a-zA-Z0-_-]*
+  string       ::= '"' ( any - '"' | '\\"' )* '"'
+  integer      ::= [0-9]+
+  float        ::= [0-9]+ '.' [0-9]+
+  boolean      ::= 'true' | 'false'
+  symbol       ::= '@' [a-zA-Z_][a-zA-Z0-9_]*
+  newline      ::= '\n' | '\r\n' | '\r'
+  whitespace   ::= ( ' ' | '\t' | newline )*
+  EOF          ::= end of file
+
+
+4. TOKEN CLASSES
+-----------------
+
+The format has exactly two structural token classes, distinguished by
+the first character. This is the LL(1) decision point.
+
+  First char   Token class   Bracket   Example
+  -----------  -----------   -------   -------
+  [A-Z]        Noun          [ ]       Window, Agent, Box
+  [a-z]        Adjective     ( )       title, name, subscribe
+  #            Comment       (none)    # this is a comment
+  ]            Close         (none)    ends current Noun
+
+Everything else at the start of a token position is a syntax error.
+
+
+5. NOUNS (TYPES)
+-----------------
+
+Nouns represent types — the entities, objects, or structural elements
+of a domain. They are the internal nodes of the tree.
+
+Rules:
+- Start with an uppercase letter (CamelCase).
+- Followed by '[' and eventually ']'.
+- Can contain adjectives (attributes), child nouns, or both.
+- Can be empty (no content between [ and ]).
+- Multiple nouns at the same level are siblings.
+
+Examples:
+
+  Window[ ]
+  Agent[ name("critic") ]
+  Box[ orientation("vertical") Label[ text("Hello") ] ]
+
+
+6. ADJECTIVES (ATTRIBUTES)
+---------------------------
+
+Adjectives are the attributes or properties of a noun. They are the
+leaf nodes of the tree.
+
+Rules:
+- Start with a lowercase letter.
+- Use snake_case (hyphens also allowed: max-length).
+- Followed by '(' and eventually ')'.
+- Contain exactly one value.
+- A noun can have many adjectives.
+- Adjectives and child nouns can be mixed in any order within a noun.
+
+Examples:
+
+  name("critic")
+  width(400)
+  orientation("vertical")
+  password(true)
+  value(3.14)
+  onclick("handle_click")
+
+
+7. VALUES
+----------
+
+Adjective values are ground-truth literals. No expressions, no
+interpolation, no code. The value types are:
+
+  Type     Syntax                    Examples
+  ------   ------                    --------
+  String   "double-quoted"           "Hello", "git.diff.ready"
+  Integer  decimal digits            42, 0, 1000
+  Float    digits.digits             3.14, 0.5
+  Boolean  true or false             true, false
+  Symbol   @identifier               @cancel, @exit
+  Noun     Noun[ content ]           Var[ bind("x") ]
+
+Strings use double quotes. Escape sequences: \\, \", \n, \t.
+Integers are non-negative (no leading zeros except for "0").
+Floats have exactly one decimal point.
+Booleans are lowercase literals.
+Symbols start with @ and are labeled references (see section 8).
+Nouns as values allow inline nesting: Var[ bind("x") default("0") ].
+
+
+8. SYMBOLS
+----------
+
+Symbols are labeled references. A symbol @key denotes a concept
+that may be defined elsewhere in the document. Two occurrences of
+@key refer to the same thing, regardless of order or position.
+
+The parser stores symbols as opaque values:
+
+  { type => 'symbol', name => 'key' }
+
+Resolution is application-defined. The parser does not validate
+that symbols have definitions, nor does it connect definitions
+to references. The application walks the tree and binds them.
+
+Examples:
+
+  Button[ text(@cancel) ]            # reference
+  Translate[ @cancel("Annuler") ]    # definition (domain extension)
+
+  Agent[ subscribe(@source) ]        # reference
+  Source[ name("source") ]           # definition by name (domain convention)
+
+
+9. COMMENTS
+-----------
+
+Lines starting with '#' are comments. Inline comments are also
+supported after any token:
+
+  name("critic")  # this is the agent name
+
+Comments are ignored by the parser. They do not affect the tree.
+
+
+10. WHITESPACE
+--------------
+
+Whitespace (spaces, tabs, newlines) is insignificant except:
+- Required between tokens to avoid ambiguity (e.g., between a noun
+  and a following adjective or noun).
+- Newlines inside strings are preserved.
+
+Indentation is for human readability only; it does not affect structure.
+
+
+11. NESTING
+------------
+
+Nouns can contain other nouns, forming a tree. The nesting rules:
+
+- A noun's content is delimited by matching [ and ].
+- Content can contain adjectives, child nouns, and comments in any order.
+- Nesting depth is unlimited (practical limit: ~20 levels).
+- Siblings at the same level are independent.
+
+Example with three levels of nesting:
+
+  Pipeline[
+    name("code-review")
+    Source[
+      topic("git.diff.ready")
+    ]
+    Agent[
+      name("critic")
+      Config[
+        quality_threshold(80)
+      ]
+    ]
+  ]
+
+
+12. LL(1) PARSING
+------------------
+
+The parser is a single-pass recursive descent. The decision at each
+point is made by looking at one character of lookahead:
+
+  Position         Lookahead    Action
+  --------         ---------    ------
+  start of token   [A-Z]       parse noun (read until '[')
+  start of token   [a-z]       parse adjective (read until '(')
+  start of token   #            skip to end of line
+  start of token   ]            pop noun from stack
+  start of token   EOF          done
+  anywhere         whitespace  skip
+  anywhere         other       syntax error
+
+The parser maintains a stack of open nouns. When it sees '[', it
+pushes. When it sees ']', it pops. No backtracking. O(n) time.
+
+
+13. AMBIGUITY RULES
+---------------------
+
+  Issue                         Resolution
+  ------                        ----------
+  Noun without content          Window[ ] is valid (empty noun)
+  Adjective without value       Not allowed; syntax error
+  Adjacent nouns                Both are children of the enclosing noun
+  Mixed adj/noun order          Allowed; order is insignificant
+  ] in a string                 Not possible (strings are delimited by ")
+  Nested ]                      Handled by the stack (matching brackets)
+
+
+14. SCOPING AND REFERENCES
+---------------------------
+
+NExT trees are self-contained. There is no global scope, no
+variable resolution, no import system at the grammar level.
+
+References between nouns use string values:
+
+  Agent[
+    subscribe("git-context.output")
+    publish("critic.output")
+  ]
+
+The parser sees "git-context.output" as a string. The runtime resolves
+the reference. The grammar does not enforce or check references.
+
+
+15. EXTENSION POINTS
+---------------------
+
+The grammar is intentionally minimal. Domain-specific extensions are
+built at the semantic layer, not the syntactic layer:
+
+  Domain      Nouns (Types)              Adjectives (Attributes)
+  ------      ----------                 ----------------------
+  GUI         Window, Box, Button        title, width, onclick
+  Pipeline    Pipeline, Agent, Source     subscribe, publish, wit
+  Config      Server, Database           host, port, timeout
+  Schema      Table, Column, Index       type, nullable, primary
+
+New nouns and adjectives are added by defining them in the application.
+The grammar does not need to change.
+
+
+16. VALIDATION
+---------------
+
+The parser validates:
+
+  - Matching [ and ] (bracket balance)
+  - Matching ( and ) (parenthesis balance)
+  - Nouns start with uppercase
+  - Adjectives start with lowercase
+  - Values are valid literals
+
+The parser does NOT validate:
+
+  - Noun names (application defines valid noun types)
+  - Adjective names (application defines valid adjectives)
+  - Value types (application defines expected types)
+  - Reference correctness (runtime resolves references)
+  - Nesting depth (no limit at grammar level)
+
+
+17. EXAMPLES
+-------------
+
+GUI:
+
+  Window[
+    title("Settings")
+    width(500)
+    height(400)
+    Box[
+      orientation("vertical")
+      Label[ text("Username") ]
+      Entry[
+        placeholder("Enter name")
+        Var[ bind("username") default("") ]
+      ]
+      Button[ text("Save") onclick("save") ]
+    ]
+  ]
+
+Pipeline:
+
+  Pipeline[
+    name("code-review")
+    about("Multi-agent code review")
+  ]
+  Source[
+    name("diff-source")
+    topic("git.diff.ready")
+  ]
+  Agent[
+    name("critic")
+    wit("logic")
+    tool("critique_code")
+    subscribe("git-context.output")
+    publish("critic.output")
+  ]
+  Sink[
+    name("review-sink")
+    subscribe("critic.output")
+    topic("review.complete")
+  ]
+
+Config:
+
+  Database[
+    host("localhost")
+    port(5432)
+    name("myapp")
+    Pool[
+      min(5)
+      max(20)
+      timeout(30)
+    ]
+  ]
+
+
+18. IMPLEMENTATION NOTES
+--------------------------
+
+The parser is ~200 lines of Perl. Core data structure:
+
+  { type => 'noun', name => 'Window', children => [...], line => 1 }
+  { type => 'adj', name => 'title', value => 'Settings', line => 2 }
+
+Output is a tree of these nodes. The application walks the tree
+and interprets it according to its domain.
+
+No external dependencies. No CPAN modules needed. Pure Perl string
+parsing with a stack.
