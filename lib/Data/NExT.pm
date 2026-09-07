@@ -6,6 +6,11 @@ use warnings;
 our $VERSION = '0.1.0';
 our $ERROR;
 
+my $RE_NOUN  = qr/\G[A-Z][a-zA-Z0-9_]*/;
+my $RE_ADJ   = qr/\G[a-z][a-zA-Z0-_-]*/;
+my $RE_NUM   = qr/\G[0-9]+(?:\.[0-9]+)?/;
+my $RE_SYM   = qr/\G\@([a-zA-Z_][a-zA-Z0-9_]*)/;
+
 sub new {
     my ($class, $input) = @_;
     my $self = {
@@ -22,14 +27,14 @@ sub _ch { substr($_[0]{input}, $_[0]{pos}, 1) }
 sub _peek {
     my ($self) = @_;
     $self->_skip_ws;
-    my $ch = $self->_ch;
     return 'EOF' if $self->{pos} >= length($self->{input});
+    my $ch = $self->_ch;
     return '#' if $ch eq '#';
     return ']' if $ch eq ']';
     return '[' if $ch eq '[';
     return '(' if $ch eq '(';
     return ')' if $ch eq ')';
-    return 'NOUN' if $ch =~ /[A-Z]/;
+    return 'NOUN' if $ch ge 'A' && $ch le 'Z';
     if ($ch eq 't' && substr($self->{input}, $self->{pos}, 4) eq 'true') {
         my $after = substr($self->{input}, $self->{pos} + 4, 1);
         return 'BOOL_T' if !defined $after || $after !~ /[a-zA-Z0-9_\-]/;
@@ -38,10 +43,10 @@ sub _peek {
         my $after = substr($self->{input}, $self->{pos} + 5, 1);
         return 'BOOL_F' if !defined $after || $after !~ /[a-zA-Z0-9_\-]/;
     }
-    return 'ADJ' if $ch =~ /[a-z_\-]/;
+    return 'ADJ' if $ch ge 'a' && $ch le 'z' || $ch eq '_' || $ch eq '-';
     return 'SYMBOL' if $ch eq '@';
     return 'STRING' if $ch eq '"';
-    return 'NUM' if $ch =~ /[0-9]/;
+    return 'NUM' if $ch ge '0' && $ch le '9';
     $ERROR = "line $self->{line}: unexpected character '$ch'";
     return 'ERR';
 }
@@ -50,8 +55,10 @@ sub _skip_ws {
     my ($self) = @_;
     while ($self->{pos} < length($self->{input})) {
         my $ch = $self->_ch;
-        if ($ch =~ /\s/) {
-            $self->{line}++ if $ch eq "\n";
+        if ($ch eq ' ' || $ch eq "\t" || $ch eq "\r") {
+            $self->{pos}++;
+        } elsif ($ch eq "\n") {
+            $self->{line}++;
             $self->{pos}++;
         } elsif ($ch eq '#') {
             while ($self->{pos} < length($self->{input}) && $self->_ch ne "\n") {
@@ -65,22 +72,27 @@ sub _skip_ws {
 
 sub _read_noun {
     my ($self) = @_;
-    my $start = $self->{pos};
     my $line = $self->{line};
-    while ($self->{pos} < length($self->{input}) && $self->_ch =~ /[A-Za-z0-9_]/) {
-        $self->{pos}++;
+    pos($self->{input}) = $self->{pos};
+    $self->{input} =~ $RE_NOUN;
+    my $len = $+[0] - $self->{pos};
+    if ($len > 0) {
+        my $name = substr($self->{input}, $self->{pos}, $len);
+        $self->{pos} += $len;
+        return { type => 'noun', name => $name, line => $line };
     }
-    return { type => 'noun', name => substr($self->{input}, $start, $self->{pos} - $start), line => $line };
+    return { type => 'noun', name => '', line => $line };
 }
 
 sub _read_adj {
     my ($self) = @_;
-    my $start = $self->{pos};
     my $line = $self->{line};
-    while ($self->{pos} < length($self->{input}) && $self->_ch =~ /[a-zA-Z0-9_\-]/) {
-        $self->{pos}++;
-    }
-    return { name => substr($self->{input}, $start, $self->{pos} - $start), line => $line };
+    pos($self->{input}) = $self->{pos};
+    $self->{input} =~ $RE_ADJ;
+    my $len = $+[0] - $self->{pos};
+    my $name = substr($self->{input}, $self->{pos}, $len);
+    $self->{pos} += $len;
+    return { name => $name, line => $line };
 }
 
 sub _read_string {
@@ -113,30 +125,27 @@ sub _read_string {
 
 sub _read_num {
     my ($self) = @_;
-    my $start = $self->{pos};
     my $line = $self->{line};
-    while ($self->{pos} < length($self->{input}) && $self->_ch =~ /[0-9]/) {
-        $self->{pos}++;
+    pos($self->{input}) = $self->{pos};
+    $self->{input} =~ $RE_NUM;
+    my $len = $+[0] - $self->{pos};
+    my $raw = substr($self->{input}, $self->{pos}, $len);
+    $self->{pos} += $len;
+    if ($raw =~ /\./) {
+        return { type => 'float', value => $raw + 0, line => $line };
     }
-    if ($self->{pos} < length($self->{input}) && $self->_ch eq '.') {
-        $self->{pos}++;
-        while ($self->{pos} < length($self->{input}) && $self->_ch =~ /[0-9]/) {
-            $self->{pos}++;
-        }
-        return { type => 'float', value => substr($self->{input}, $start, $self->{pos} - $start) + 0, line => $line };
-    }
-    return { type => 'integer', value => substr($self->{input}, $start, $self->{pos} - $start) + 0, line => $line };
+    return { type => 'integer', value => $raw + 0, line => $line };
 }
 
 sub _read_symbol {
     my ($self) = @_;
     my $line = $self->{line};
-    $self->{pos}++; # skip @
-    my $start = $self->{pos};
-    while ($self->{pos} < length($self->{input}) && $self->_ch =~ /[a-zA-Z0-9_]/) {
-        $self->{pos}++;
-    }
-    return { type => 'symbol', value => '@' . substr($self->{input}, $start, $self->{pos} - $start), line => $line };
+    pos($self->{input}) = $self->{pos};
+    $self->{input} =~ $RE_SYM;
+    my $end = $+[0];
+    my $name = $1;
+    $self->{pos} = $end;
+    return { type => 'symbol', value => '@' . $name, line => $line };
 }
 
 sub _expect {
