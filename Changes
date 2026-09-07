@@ -1,5 +1,9 @@
 Revision history for NExT
 
+0.1.1 2026-09-08
+    - Optimize parser with pre-compiled \G regexes (~30% faster)
+    - Replace char-by-char token reading with anchored regex matches
+
 0.1.0 2026-09-07
     - Initial release
     - LL(1) recursive descent parser for Noun Expression Trees
