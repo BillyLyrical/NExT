@@ -1,0 +1,445 @@
+NExT SCHEMA VALIDATION — DISCUSSION DOCUMENT
+===============================================
+
+Status: discussion. This document lays out the design space for
+NExT schema validation. It asks questions, not answers them. The
+goal is feedback from people who have actually used XML Schema,
+JSON Schema, and similar systems in production.
+
+
+1. WHAT DOES THE PARSER ALREADY DO?
+--------------------------------------
+
+NExT's parser validates structural correctness:
+
+  - Bracket balance ([ ] and ( ))
+  - Noun starts with uppercase
+  - Adjective starts with lowercase
+  - Values are valid literals (string, int, float, bool, symbol, list)
+  - List items are atomic (no nested nouns or lists)
+  - No other characters at token start position
+
+This catches syntax errors. It does NOT catch semantic errors:
+
+  - "port" appears on a Database, but should be "host"
+  - A Noun appears where only Adjectives are valid
+  - A required Adjective is missing
+  - A value is 99999 but should be 1-65535
+  - Two Nouns with the same name appear where only one is valid
+
+Schema validation catches these. The question is: how?
+
+
+2. WHAT SCHEMAS ARE FOR
+--------------------------
+
+Schemas serve three audiences:
+
+  Authors      "Am I writing this correctly?"
+  Runners      "Is this document safe to process?"
+  Tools        "Can I offer autocomplete, linting, documentation?"
+
+Each audience has different needs:
+
+  Author:     clear errors, generous parsing, "did you mean X?"
+  Runner:     strict validation, fail fast, no surprises
+  Tool:       machine-readable structure, type info, descriptions
+
+A schema system that serves all three well is harder than one
+that serves just one. Most schema systems optimize for runners
+and tools, and leave authors to figure it out.
+
+NExT's design principle — "LLM-generable" — means authors are
+often LLMs. The schema should be something an LLM can produce
+correctly 99% of the time. This biases toward simplicity.
+
+
+3. THE LEARNING FROM XML SCHEMA
+---------------------------------
+
+XML Schema (XSD) is the most powerful mainstream schema language.
+It is also the most hated. What went wrong:
+
+  Verbose:     Defining a simple type takes 20+ lines.
+  Complex:     Simple vs complex types, substitution groups,
+               wildcards, namespaceQualified, block/final.
+  Opaque:      The meta-vocabulary (xs:element, xs:complexType,
+               xs:sequence, xs:choice) is a language unto itself.
+  Author-hostile: Writing XSD by hand is painful. Most people
+               use GUI tools or generate from code.
+  LLM-hostile: An LLM asked to write XSD for a simple config
+               will hallucinate namespace URIs.
+
+What XSD got right:
+
+  Rich type system:  Patterns, ranges, enumerations, unions.
+  Reusable types:    Define once, use everywhere.
+  Self-describing:   Schemas are XML, so they can be validated
+                     by other schemas (turtles all the way down).
+  Tooling:           IDE autocomplete, code generation, runtime
+                     validation libraries in every language.
+
+Lesson: Power and usability are inversely correlated. The more
+a schema can express, the harder it is to write and understand.
+
+
+4. THE LEARNING FROM JSON SCHEMA
+----------------------------------
+
+JSON Schema is simpler than XSD and covers most real-world needs.
+What it got right:
+
+  Readable:    JSON syntax, not a separate language.
+  Practical:   Required/optional, type checking, nested objects.
+  Composable:  allOf, oneOf, anyOf for combining schemas.
+  Ecosystem:   Validators in every language, IDE support.
+
+What it got wrong or left awkward:
+
+  Verbose:     "type": "object", "properties": {...} is boilerplate
+               every time. You can't just say "this is a User."
+  Open world:  By default, extra properties are allowed. You must
+               explicitly add "additionalProperties": false. This
+               is the right default for extensibility but wrong
+               for strict configs.
+  No structure: JSON objects are flat key-value. No concept of
+               "this Noun contains these Adjectives" — you have
+               to describe it as nested objects.
+  $ref pain:   References are powerful but confusing. Circular
+               refs, recursive schemas, pointer resolution.
+               Simple until they're not.
+
+Lesson: Start simple, add complexity only when needed. JSON
+Schema's biggest win is that you can write a useful schema in
+5 lines. The 50-line schema is rare.
+
+
+5. WHAT NExT NATURALLY PROVIDES
+---------------------------------
+
+NExT's grammar already encodes the schema's core concepts:
+
+  Noun        = Type (structural element)
+  Adjective   = Attribute (property of a type)
+  Value       = Ground-truth literal (string, int, float, bool)
+  Nesting     = Composition (Nouns contain other Nouns)
+
+This maps directly to what schemas describe:
+
+  Schema concept         NExT equivalent
+  ----------------       ----------------
+  Type definition        Noun definition
+  Property               Adjective definition
+  Value type             Value type constraint
+  Required property      Adjective marked required
+  Nested structure       Child Nouns defined inside parent
+  Enum                   Symbol with allowed values
+  Cardinality            Noun count constraints
+
+The schema can be written in NExT itself:
+
+  Pipeline[
+      required(true)
+      AdjDef[
+          name("name")
+          type("string")
+          required(true)
+      ]
+      NounDef[
+          name("Agent")
+          required(true)
+          AdjDef[ name("name") type("string") required(true) ]
+          AdjDef[ name("wit") type("string") ]
+      ]
+  ]
+
+No new format. No new syntax. The schema IS a NExT document
+with a meta-vocabulary of schema-level Nouns.
+
+
+6. THE DESIGN SPACE — KEY QUESTIONS
+-------------------------------------
+
+These are the questions that need real-world input. There are
+no universally correct answers.
+
+
+6.1 OPEN VS CLOSED WORLD
+
+  Open (JSON Schema default):
+    Define what MUST be present. Extra stuff is allowed.
+    Good for: extensible configs, plugin systems, evolution.
+    Bad for: strict protocols, security-sensitive configs.
+
+  Closed (XSD default):
+    Define what CAN be present. Extra stuff is an error.
+    Good for: strict contracts, validation, testing.
+    Bad for: evolution, backward compatibility.
+
+  Hybrid:
+    Open by default. Close explicitly.
+    NounDef[ name("Window") closed(true) ]
+
+  Question: What's the right default for NExT?
+  My lean: Open by default. NExT is a data format, not a
+  contract language. Most configs evolve. Strict validation
+  is opt-in.
+
+
+6.2 HOW STRICT ON VALUES?
+
+  Loose:
+    "port" is present and is an integer. Don't care about range.
+    Good for: quick validation, catching typos.
+
+  Medium:
+    "port" is present, is an integer, and is between 1 and 65535.
+    Good for: catching real mistakes without over-engineering.
+
+  Strict:
+    "port" must match the regex "^[0-9]{1,5}$" and be in the
+    IANA port range and not conflict with well-known ports.
+    Good for: enterprise compliance, security audits.
+
+  Question: What level of value validation is useful?
+  My lean: Medium. Types + ranges + enums cover 95% of real
+  needs. Regex patterns are the escape hatch for the other 5%.
+
+
+6.3 CARDINALITY — HOW MANY?
+
+  Simple:
+    required(true/false), repeatable(true/false).
+    "This adjective must appear exactly once" or "may appear
+    zero or more times."
+
+  Detailed:
+    min/max count for both Adjectives and child Nouns.
+    Agent[ ... AdjDef[ name("tag") min(0) max(5) ] ]
+
+  Question: Do we need min/max, or is required enough?
+  My lean: required + repeatable covers most cases. min/max
+  is rarely needed and adds complexity.
+
+
+6.4 ENUMS — SYMBOL VALUES
+
+  NExT already has symbols (@cancel, @exit). Enums constrain
+  which symbols are valid:
+
+    AdjDef[
+        name("action")
+        type("symbol")
+        values(["@cancel" "@retry" "@abort"])
+    ]
+
+  Question: Are enums symbols only, or also strings?
+    Symbol enum: values(["@a" "@b" "@c"])
+    String enum: values(["dev" "staging" "production"])
+    Both?
+
+  My lean: Both. String enums are more common in configs.
+  Symbols are more NExT-idiomatic but less practical.
+
+
+6.5 REUSABILITY — HOW TO SHARE TYPES?
+
+  Inline:
+    Define types where they're used. Simple but repetitive.
+    Two Agent definitions with identical AdjDefs.
+
+  Ref:
+    Reference a named type definition elsewhere.
+    AdjDef[ name("agent") type-ref("Agent") ]
+
+  Import:
+    Include schema definitions from another file.
+    %Include("base-types.nxs")
+
+  Question: Do we need named types and references, or is
+  inline + %Include sufficient?
+  My lean: Start with inline + %Include. Named types and
+  references can be added later if needed. YAGNI.
+
+
+6.6 COMPOSITION — MIXING SCHEMAS
+
+  JSON Schema has allOf, oneOf, anyOf. Do we need these?
+
+  allOf:  Must satisfy ALL schemas. (AND)
+  oneOf:  Must satisfy exactly ONE schema. (XOR)
+  anyOf:  Must satisfy at least ONE schema. (OR)
+
+  When would you use these?
+  - A Pipeline can be either a DataPipeline or an ML Pipeline
+    (oneOf)
+  - A config must satisfy both SecuritySchema AND PerfSchema
+    (allOf)
+
+  Question: Is composition needed in v1, or is it a v2 feature?
+  My lean: v2. Most real-world schemas are simple type defs.
+  Composition is powerful but adds significant complexity.
+
+
+6.7 ERROR MESSAGES — THE AUTHOR EXPERIENCE
+
+  The most underrated part of schema design. Bad error messages:
+
+    "Invalid value at line 5"
+    "Property 'port' is not defined"
+    "Schema validation failed"
+
+  Good error messages:
+
+    "Database.port: expected integer 1-65535, got string 'abc'"
+    "Agent: required adjective 'name' is missing"
+    "Pipeline.Agent: expected 1-5 Agents, found 8"
+
+  Question: How much effort do we put into error messages?
+  My lean: A LOT. Error messages ARE the author experience.
+  A schema that produces bad errors is worse than no schema.
+
+
+6.8 SELF-DESCRIBING — SCHEMAS IN NExT
+
+  If schemas are NExT documents, then:
+  - Schemas can be validated by the NExT parser
+  - Schemas can include other schemas (%Include)
+  - Schemas can be generated by LLMs (same grammar)
+  - Schemas can be stored alongside the documents they validate
+
+  But the meta-vocabulary (NounDef, AdjDef, etc.) is new.
+  Where does it live?
+
+  Option A: In the schema spec document. Defined once, reused.
+  Option B: In a base schema that other schemas %Include.
+  Option C: In code. The validator knows the meta-vocabulary;
+            schemas just use it.
+
+  Question: Should the meta-vocabulary be a NExT grammar
+  extension, or is it just "convention among NExT documents"?
+  My lean: Option C. The validator knows NounDef/AdjDef. The
+  schema is just NExT. No grammar changes needed.
+
+
+7. MINIMUM VIABLE SCHEMA
+---------------------------
+
+If I had to ship a v1 schema system tomorrow, here's what
+I'd build:
+
+  NounDef[
+      name("TypeName")
+      description("optional docs")
+      required(true or false)
+      AdjDef[
+          name("adj_name")
+          type("string" | "integer" | "float" | "boolean" | "symbol")
+          required(true or false)
+          default("value")
+          min(number)           # for integers/floats
+          max(number)           # for integers/floats
+          values(["a" "b" "c"]) # enum constraint
+          pattern("regex")      # string pattern
+      ]
+      NounDef[ ... ]           # nested type definitions
+  ]
+
+That's it. No composition, no named references, no $ref, no
+allOf/oneOf. Just types, attributes, types, and constraints.
+
+Covered:
+  ✓ Type definitions (what Nouns exist)
+  ✓ Attribute definitions (what Adjectives each Noun has)
+  ✓ Value types (string, int, float, bool, symbol)
+  ✓ Required/optional
+  ✓ Default values
+  ✓ Numeric ranges (min/max)
+  ✓ Enums (allowed values)
+  ✓ String patterns (regex)
+  ✓ Nested structure
+  ✓ Documentation (description)
+  ✓ Open world (extras allowed by default)
+  ✓ Closed world (opt-in strict mode)
+
+Not covered (v2):
+  ✗ Composition (allOf, oneOf, anyOf)
+  ✗ Named type references ($ref)
+  ✗ Conditional schemas (if/then/else)
+  ✗ Pattern properties
+  ✗ Additional properties control (beyond open/closed)
+
+
+8. WHAT I'D ASK EXPERIENCED DEVS
+-----------------------------------
+
+  1. "Have you ever used JSON Schema in production? What
+      frustrated you?"
+
+  2. "When validating config files, what errors do you actually
+      want to see? What's noise?"
+
+  3. "Do you validate configs at load time, deploy time, or
+      both? When does validation add value vs overhead?"
+
+  4. "Is 'open world' (extras allowed) the right default for
+      a config format? Or should strict be the default?"
+
+  5. "How important are error messages vs coverage? Would you
+      rather have 10 constraints with great errors, or 50
+      constraints with generic errors?"
+
+  6. "Do you trust LLMs to write schemas correctly? What
+      percentage of the time? What would make you trust them
+      more?"
+
+  7. "Is 'schemas are NExT documents' a feature (self-describing,
+      same tools) or a limitation (can't express things NExT
+      can't represent)?"
+
+  8. "What's the minimum schema that would make you actually
+      use validation? What's the bar?"
+
+  9. "Have you used XML Schema enough to have scar tissue?
+      What specifically burned you?"
+
+  10. "Is there a schema system you've used that you'd
+       recommend as a model? What made it work?"
+
+
+9. MY BIASES
+--------------
+
+  - Schemas should be written by humans (or LLMs), not generated
+    from code. If the schema is harder to write than the config,
+    nobody will write it.
+
+  - Error messages are more important than expressiveness. A
+    schema that says "invalid" is useless. A schema that says
+    "port must be 1-65535, got -1" is helpful.
+
+  - Start with the 80% case. Types + required + defaults + ranges
+    covers most real configs. Don't build a general-purpose
+    constraint language on day one.
+
+  - Self-describing is a feature. Schemas in NExT means one parser,
+    one toolchain, one mental model.
+
+  - The validator should be a library, not a CLI. Integrate into
+    application startup, CI pipelines, editor plugins — wherever
+    config loading happens.
+
+
+10. NEXT STEPS
+---------------
+
+  1. Write a schema for a real NExT config (the Pipeline example
+     from the spec, or a real project config).
+  2. Validate a document against it. See what feels right.
+  3. Write a schema for a GUI layout (the Window/Box/Button
+     example). See if the same constraints work.
+  4. Try writing schemas as an LLM. What percentage are correct?
+  5. Ship the MVP. Get feedback. Iterate.
+
+The best schema design will come from using NExT in anger,
+not from theorizing about it.
