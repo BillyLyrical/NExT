@@ -1,6 +1,6 @@
 # NExT
 
-A lightweight Perl parser for the [NExT (Noun Expression Tree) format](NExT_spec.txt).
+A lightweight Perl parser for the [NExT (Noun Expression Tree) format](doc/NExT_spec.txt).
 
 NExT is a declarative, hierarchical data format designed for LL(1)
 single-pass parsing. It is purely declarative with no code, no logic,

@@ -1,0 +1,300 @@
+NExT TEMPLATE SPECIFICATION
+=============================
+
+Status: specification. The NExT Template pre-processor handles variable
+interpolation, command substitution, and file inclusion before the
+NExT parser sees the data.
+
+
+1. NAME
+-------
+
+NExT Templates are pre-processed NExT files with variable
+interpolation, command substitution, and file inclusion. The
+pre-processor expands all template syntax and outputs pure NExT.
+
+File extension: .nxt
+
+
+2. DESIGN PRINCIPLES
+---------------------
+
+Templates are a thin text layer on top of NExT:
+
+  - Pre-processing is text substitution, not parsing.
+  - The output is always valid NExT.
+  - The NExT parser never sees template syntax.
+  - No loops, no functions, no expressions. Fill in blanks and get out.
+  - Variables come from the environment or the command line.
+  - Command substitution runs shell commands and inserts output.
+  - File inclusion inlines file contents before parsing.
+
+The pre-processor is a separate tool. Data::NExT::Template implements
+the logic. The parser (Data::NExT) is unchanged.
+
+
+3. SYNTAX
+-----------
+
+Templates add these constructs to NExT text:
+
+  Construct        Syntax              Example
+  ---------        ------              -------
+  Variable         ${NAME}             ${HOME}
+  Default value    ${NAME:-default}    ${PORT:-5432}
+  Command          `command`           `hostname`
+  Include          @include "file"     @include "base.nx"
+  Conditional      #ifdef NAME         #ifdef DEBUG
+                   #ifndef NAME        #ifndef PRODUCTION
+                   #else               #else
+                   #endif              #endif
+
+Everything else is literal NExT text, passed through unchanged.
+
+
+4. VARIABLE INTERPOLATION
+---------------------------
+
+Variables are expanded from the environment or command-line
+definitions. Syntax: ${NAME} or ${NAME:-default}.
+
+Rules:
+- ${NAME} expands to the value of environment variable NAME.
+- If NAME is not set, ${NAME} expands to empty string.
+- ${NAME:-default} expands to NAME if set, otherwise "default".
+- Variables are expanded inside strings, comments, and bare text.
+- Variables are NOT expanded inside NExT value positions that
+  would change the parse tree (e.g., inside noun names).
+- Nested variables are not supported: ${${X}} is literal text.
+
+Examples:
+
+  # input
+  host("${HOSTNAME}")
+  port(${PORT:-5432})
+  name("${USER:-anonymous}")
+
+  # with HOSTNAME=psycho, PORT unset, USER=billy
+  host("psycho")
+  port(5432)
+  name("billy")
+
+
+5. COMMAND SUBSTITUTION
+------------------------
+
+Commands are executed and their stdout is inserted. Syntax: `command`.
+
+Rules:
+- The command runs in /bin/sh (or the system shell).
+- Trailing newline is stripped from output.
+- stderr goes to the pre-processor's stderr, not the output.
+- Commands run during pre-processing, not at parse time.
+- Command output is inserted as raw text, no escaping.
+- If the command fails (non-zero exit), the pre-processor
+  warns but still inserts the empty output.
+
+Examples:
+
+  # input
+  version( `git describe --tags --always` )
+  timestamp( `date -u +%Y-%m-%dT%H:%M:%SZ` )
+  host( `hostname -s` )
+
+  # output (on git repo at tag v0.2.0)
+  version("v0.2.0")
+  timestamp("2026-09-08T12:00:00Z")
+  host("psycho")
+
+
+6. FILE INCLUSION
+------------------
+
+Files are inlined at the include point. Syntax: @include "path".
+
+Rules:
+- The path is relative to the including file's directory.
+- Included content replaces the @include line.
+- Included content is a valid NExT fragment (not a full document).
+- Includes can be nested (an included file can include others).
+- Circular includes are detected and produce an error.
+- Included files are pre-processed (variables and commands
+  are expanded in included content).
+
+Examples:
+
+  # main.nxt
+  Pipeline[
+      name("my-pipeline")
+      @include "agents.nx"
+      @include "config.nx"
+  ]
+
+  # agents.nx (pure NExT, no template syntax)
+  Agent[
+      name("critic")
+      subscribe("git.diff.ready")
+  ]
+
+
+7. CONDITIONALS
+----------------
+
+Conditional blocks include or exclude content based on variables.
+
+Syntax:
+
+  #ifdef VARNAME
+  ...content included if VARNAME is set and non-empty...
+  #else
+  ...content included if VARNAME is not set or empty...
+  #endif
+
+  #ifndef VARNAME
+  ...content included if VARNAME is NOT set or empty...
+  #else
+  ...content included if VARNAME is set and non-empty...
+  #endif
+
+Rules:
+- #ifdef checks if a variable is set and non-empty.
+- #ifndef is the inverse of #ifdef.
+- #else is optional.
+- #endif is required to close the block.
+- Nesting is allowed (each #ifdef needs its own #endif).
+- Conditionals are evaluated during pre-processing.
+
+Examples:
+
+  # input
+  Agent[
+      name("debug-agent")
+      #ifdef DEBUG
+      log_level("verbose")
+      #endif
+      #ifndef PRODUCTION
+      metrics("enabled")
+      #endif
+  ]
+
+  # with DEBUG=1, PRODUCTION unset
+  Agent[
+      name("debug-agent")
+      log_level("verbose")
+      metrics("enabled")
+  ]
+
+  # with PRODUCTION=1, DEBUG unset
+  Agent[
+      name("debug-agent")
+      metrics("enabled")
+  ]
+
+
+8. PROCESSING ORDER
+---------------------
+
+The pre-processor applies transformations in this order:
+
+  1. Read the template file.
+  2. Process conditionals (#ifdef / #ifndef / #else / #endif).
+     Content in false branches is removed.
+  3. Process @include directives. Included files are recursively
+     pre-processed from step 1.
+  4. Expand ${VAR} variables.
+  5. Expand `command` substitutions.
+  6. Output pure NExT.
+
+The output is valid NExT. The parser processes it without
+knowing template syntax existed.
+
+
+9. ERROR HANDLING
+------------------
+
+The pre-processor reports errors with file and line number:
+
+  # unknown variable
+  Warning: undefined variable 'FOO' at config.nxt line 5
+
+  # failed command
+  Warning: command 'bad-cmd' failed (exit 1) at config.nxt line 8
+
+  # missing include
+  Error: include file not found: 'missing.nx' at config.nxt line 12
+
+  # unclosed conditional
+  Error: unclosed #ifdef at config.nxt line 3
+
+  # circular include
+  Error: circular include detected: 'a.nxt' -> 'b.nxt' -> 'a.nxt'
+
+Warnings (undefined variable, failed command) continue processing.
+Errors (missing include, unclosed conditional) abort.
+
+
+10. SECURITY
+--------------
+
+Command substitution runs arbitrary shell commands. The pre-processor
+trusts the template author. Do not pre-process untrusted templates
+without sandboxing.
+
+Recommended practice:
+- Use nxt-preprocess only on files you wrote or trust.
+- Pipe through nxt-validate after pre-processing.
+- Never run pre-processed output through eval or system
+  without review.
+
+
+11. CLI USAGE
+--------------
+
+  nxt-preprocess [options] file.nxt > file.nx
+
+Options:
+  -D NAME=VALUE    Define a variable (can be repeated).
+  -I dir           Add include search path.
+  -s               Silent mode (suppress warnings).
+  -h               Show help.
+
+Examples:
+
+  nxt-preprocess -D ENV=production -D PORT=5432 config.nxt > config.nx
+  nxt-preprocess -I ./includes main.nxt | nxt-validate schema.nxs
+
+
+12. IMPLEMENTATION
+-------------------
+
+The pre-processor is ~200 lines of Perl. Module: Data::NExT::Template.
+
+Core logic:
+
+  sub preprocess {
+      my ($input, %vars) = @_;
+      my $output = $input;
+
+      $output = process_conditionals($output, \%vars);
+      $output = process_includes($output);
+      $output = expand_variables($output, \%vars);
+      $output = expand_commands($output);
+
+      return $output;
+  }
+
+Each step is a simple text transformation. No parsing of NExT
+structure — just string operations with regex.
+
+Dependencies: Data::NExT (for validate step, optional),
+IPC::Run3 or backticks (for command substitution).
+
+
+13. FILE CONVENTIONS
+---------------------
+
+  *.nxt    — NExT template (pre-process first)
+  *.nx     — pure NExT (parse directly)
+
+The pre-processor reads .nxt, outputs .nx. The parser only
+sees .nx files.

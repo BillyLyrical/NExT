@@ -1,10 +1,11 @@
 Changes
+doc/NExT_spec.txt
+doc/NExT_Template.txt
+doc/NExT_AI_Hint.md
 lib/Data/NExT.pm
 LICENSE
 Makefile.PL
 MANIFEST			This list of files
-NExT_spec.txt
 README.md
 t/next.t
 VERSION
-writing-next.md
