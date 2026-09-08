@@ -1,0 +1,28 @@
+{
+  "name": "next-syntax",
+  "displayName": "NExT Syntax",
+  "description": "Syntax highlighting for NExT (Noun Expression Tree) files",
+  "version": "0.1.0",
+  "publisher": "next-format",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "next",
+        "aliases": ["NExT", "next"],
+        "extensions": [".nx", ".nxt"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "next",
+        "scopeName": "source.nxt",
+        "path": "./syntaxes/nxt.tmLanguage.json"
+      }
+    ]
+  }
+}
