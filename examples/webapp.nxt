@@ -1,0 +1,72 @@
+# Web App Configuration
+# ----------------------
+# A realistic config for a Perl web application.
+# Run: nxt-preprocess -D APP_ENV=production app.nxt > app.nx
+
+Server[
+    host("0.0.0.0")
+    port(${PORT:5000})
+    workers(${WORKERS:4})
+    timeout(30)
+]
+
+Database[
+    driver("PostgreSQL")
+    host("${DB_HOST:localhost}")
+    port(${DB_PORT:5432})
+    name("${DB_NAME:myapp}")
+    username("${DB_USER:app}")
+    password("${DB_PASS:}")
+    Pool[
+        min(${DB_POOL_MIN:5})
+        max(${DB_POOL_MAX:20})
+        timeout(${DB_POOL_TIMEOUT:30})
+    ]
+]
+
+Cache[
+    driver("Redis")
+    host("${REDIS_HOST:localhost}")
+    port(${REDIS_PORT:6379})
+    ttl(3600)
+    namespace("myapp")
+]
+
+Logging[
+    level("${LOG_LEVEL:info}")
+    format("json")
+    File[
+        path("/var/log/myapp/app.log")
+        max_size("10M")
+        rotations(5)
+    ]
+]
+
+%Ifdef("DEBUG")
+Profiler[
+    enabled(true)
+    slow_threshold(500)
+]
+%Endif
+
+%Ifndef("PRODUCTION")
+Development[
+    auto_reload(true)
+    debug_toolbar(true)
+]
+%Endif
+
+Session[
+    driver("cookie")
+    name("myapp_session")
+    expiry(86400)
+    secure(${SESSION_SECURE:true})
+]
+
+Mail[
+    driver("smtp")
+    host("${SMTP_HOST:localhost}")
+    port(${SMTP_PORT:587})
+    username("${SMTP_USER:}")
+    password("${SMTP_PASS:}")
+]

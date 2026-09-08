@@ -1,0 +1,87 @@
+# Multi-Agent Pipeline
+# ---------------------
+# A code review pipeline with agents, subscriptions, and topics.
+# Demonstrates NExT for agent orchestration configs.
+
+Pipeline[
+    name("code-review")
+    version("2.0")
+    about("Automated code review pipeline with quality gates")
+
+    Topic[
+        name("git.push")
+        description("Incoming git push events")
+    ]
+    Topic[
+        name("review.complete")
+        description("Review results ready for consumption")
+    ]
+
+    Source[
+        name("git-webhook")
+        topic("git.push")
+        description("Receives GitHub/GitLab webhook payloads")
+    ]
+
+    Agent[
+        name("diff-parser")
+        wit("parsing")
+        subscribe("git.push")
+        publish("diff.parsed")
+        Config[
+            max_file_size(1048576)
+            ignore_patterns(["*.lock" "*.min.js" "*.min.css"])
+        ]
+    ]
+
+    Agent[
+        name("logic-critic")
+        wit("logic")
+        subscribe("diff.parsed")
+        publish("review.logic")
+        Config[
+            severity_threshold("warning")
+            max_issues(50)
+        ]
+    ]
+
+    Agent[
+        name("style-critic")
+        wit("style")
+        subscribe("diff.parsed")
+        publish("review.style")
+        Config[
+            rules(["naming" "formatting" "documentation"])
+        ]
+    ]
+
+    Agent[
+        name("security-critic")
+        wit("security")
+        subscribe("diff.parsed")
+        publish("review.security")
+        Config[
+            check_secrets(true)
+            check_injections(true)
+        ]
+    ]
+
+    Agent[
+        name("review-aggregator")
+        wit("aggregation")
+        subscribe("review.logic")
+        subscribe("review.style")
+        subscribe("review.security")
+        publish("review.complete")
+        Config[
+            require_all(true)
+            timeout(300)
+        ]
+    ]
+
+    Sink[
+        name("notification")
+        subscribe("review.complete")
+        topic("notification.send")
+    ]
+]

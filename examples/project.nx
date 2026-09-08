@@ -1,0 +1,57 @@
+# Project Configuration
+# ---------------------
+# A developer tool's config — linter, formatter, test runner.
+# Demonstrates NExT for toolchain configuration.
+
+Project[
+    name("my-perl-lib")
+    version("1.2.3")
+    author("Jane Dev")
+    license("MIT")
+]
+
+Build[
+    type("perl")
+    module("My::Perl::Lib")
+    requires_perl("5.036")
+    Configure[
+        disable_ipa(true)
+    ]
+]
+
+Test[
+    harness("prove")
+    flags("-lr")
+    Default[
+        include("t")
+        jobs(4)
+    ]
+    Coverage[
+        enabled(true)
+        minimum(80)
+        ignore(["t/.*" "examples/.*"])
+    ]
+]
+
+Lint[
+    name("perlcritic")
+    severity(3)
+    exclude(["ValuesAndExpressions::ProhibitConstantPragma"])
+]
+
+Format[
+    name("perltidy")
+    profile("perl.bestpractical")
+]
+
+Documentation[
+    format("pod")
+    output("html")
+    sections(["NAME" "SYNOPSIS" "DESCRIPTION" "AUTHOR" "LICENSE"])
+]
+
+Release[
+    tool("Dist::Zilla")
+    dry_run(true)
+    register_issues(true)
+]

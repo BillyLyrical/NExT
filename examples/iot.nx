@@ -1,0 +1,94 @@
+# IoT Device Network
+# -------------------
+# Smart home device configuration with groups and automation.
+# Demonstrates NExT for IoT/device config.
+
+Network[
+    name("home")
+    protocol("mqtt")
+    broker("localhost")
+    port(1883)
+
+    Group[
+        name("living-room")
+        Device[
+            type("light")
+            id("lr-ceiling-1")
+            model("Philips Hue")
+            protocol("zigbee")
+            brightness(80)
+            color_temperature(2700)
+        ]
+        Device[
+            type("light")
+            id("lr-lamp-1")
+            model("IKEA Tradfri")
+            protocol("zigbee")
+            brightness(60)
+        ]
+        Device[
+            type("sensor")
+            id("lr-motion-1")
+            model("Aqara")
+            protocol("zigbee")
+            readings(["temperature" "humidity" "illuminance"])
+            interval(30)
+        ]
+        Device[
+            type("speaker")
+            id("lr-speaker-1")
+            model("Sonos One")
+            protocol("wifi")
+            volume(40)
+        ]
+    ]
+
+    Group[
+        name("bedroom")
+        Device[
+            type("light")
+            id("br-ceiling-1")
+            model("Philips Hue")
+            protocol("zigbee")
+            brightness(40)
+            color_temperature(2200)
+        ]
+        Device[
+            type("sensor")
+            id("br-motion-1")
+            model("Aqara")
+            protocol("zigbee")
+            readings(["temperature" "humidity"])
+            interval(60)
+        ]
+    ]
+]
+
+Automation[
+    name("morning-wake")
+    trigger("time:07:00")
+    conditions(["weekday"])
+    Action[
+        device("lr-ceiling-1")
+        action("on")
+        brightness(30)
+    ]
+    Action[
+        device("lr-ceiling-1")
+        action("fade")
+        brightness(80)
+        duration(300)
+    ]
+]
+
+Automation[
+    name("motion-light")
+    trigger("sensor:lr-motion-1:illuminance")
+    conditions(["value < 100"])
+    Action[
+        device("lr-ceiling-1")
+        action("on")
+        brightness(80)
+    ]
+    cooldown(60)
+]
