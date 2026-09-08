@@ -114,7 +114,174 @@ Schema's biggest win is that you can write a useful schema in
 5 lines. The 50-line schema is rare.
 
 
-5. WHAT NExT NATURALLY PROVIDES
+5. THE LEARNING FROM XPATH
+----------------------------
+
+XPath is a query language for selecting nodes in XML documents.
+It's not a schema language, but it solves adjacent problems —
+navigating trees and expressing conditions on nodes. Several
+ideas are worth borrowing.
+
+5.1 PATH EXPRESSIONS FOR NAVIGATION
+
+XPath navigates XML trees with path expressions:
+
+  /Database/Pool/@min
+
+NExT's tree structure is identical in shape. Variable resolution
+already uses paths (${db/pool/min}). Schemas should too:
+
+  # Instead of defining Pool as a standalone type and hoping
+  # the validator figures out it goes inside Database:
+  NounDef[ name("Pool") ... ]
+
+  # Define the relationship by path:
+  NounDef[
+      name("Database")
+      NounDef[
+          name("Pool")
+          AdjDef[ name("min") type("integer") ]
+      ]
+  ]
+
+  # Or reference nested types by path in constraints:
+  Constraint[ path("Database/Pool/min") max(100) ]
+
+Path-based references are clearer than name-based references.
+Two different Nouns can have the same name in different contexts.
+Paths disambiguate: "Pool inside Database" vs "Pool inside Cache".
+
+5.2 SIBLING CONSTRAINTS
+
+XPath defines axes — child, parent, sibling, ancestor, descendant.
+Most schema languages only talk about children. XPath shows that
+sibling constraints solve real problems:
+
+  # "Each Agent must have a unique name among its siblings"
+  not(following-sibling::Agent[name = current()/name])
+
+  # "The first child of Pipeline must be a name AdjDef"
+  Pipeline/name[1]
+
+  # "Agent must be a child of Pipeline, not standalone"
+  self::Agent and parent::Pipeline
+
+For NExT schemas, the useful axes are:
+
+  child       What's inside this Noun (already covered by nesting)
+  sibling     What's alongside this Noun (uniqueness, ordering)
+  parent      What contains this Noun (context validation)
+  descendant  What's nested anywhere inside (recursive checks)
+
+Sibling constraints are the most practical:
+
+  # "No two Agents in the same Pipeline can have the same name"
+  unique(Pipeline/Agent, "name")
+
+  # "Config must appear before Logging in the document order"
+  preceding(Config, Logging)
+
+5.3 PREDICATES FOR CONDITIONAL CONSTRAINTS
+
+XPath predicates [condition] filter nodes:
+
+  # XPath: find Agent nodes where name = "critic"
+  Agent[name="critic"]
+
+  # XPath: find Pool where min > 5
+  Pool[min > 5]
+
+NExT schemas could use similar predicates:
+
+  # "If Agent has wit('logic'), it must also have subscribe(...)"
+  Agent[wit="logic"] => required AdjDef("subscribe")
+
+  # "If port is set, host must also be set"
+  Database[port] => required AdjDef("host")
+
+  # "Pool.max must be >= Pool.min"
+  Database/Pool[max] => max >= Database/Pool/min
+
+Predicates turn static type definitions into conditional rules.
+They're the bridge between "what CAN exist" and "what MUST
+coexist."
+
+5.4 POSITION AND COUNT
+
+XPath position predicates:
+
+  count(Pipeline/Agent) >= 2        # at least 2 agents
+  count(Pipeline/Agent) <= 10       # at most 10 agents
+  Pipeline/Agent[1]                 # first agent
+  Pipeline/Agent[last()]            # last agent
+
+These map directly to cardinality constraints:
+
+  NounDef[
+      name("Agent")
+      min_count(1)    # at least one Agent required
+      max_count(5)    # at most five Agents allowed
+  ]
+
+Or per-parent:
+
+  NounDef[
+      name("Pipeline")
+      NounDef[
+          name("Agent")
+          min_count(1)
+          max_count(10)
+      ]
+  ]
+
+5.5 WILDCARDS
+
+XPath wildcards:
+
+  *       any element
+  @*      any attribute
+  node()  any node
+
+Useful for schema constraints:
+
+  # "Every Noun inside Pipeline must have a name AdjDef"
+  Pipeline/*/AdjDef[@name="name"]
+
+  # "No unknown Nouns are allowed inside Database"
+  Database/* except (Pool, Replica, Backup)
+
+  # "All Adjectives on Agent must be required"
+  Agent/@*[not(required)]
+
+Wildcards are the escape hatch for "I want to constrain the
+structure without listing every possible Noun."
+
+5.6 WHAT NOT TO TAKE FROM XPATH
+
+  - The full axis set (preceding-sibling, following,
+    ancestor-or-self) is overkill for NExT's simpler tree.
+  - XPath predicate syntax is powerful but dense. NExT should
+    stay readable to humans and LLMs.
+  - XPath functions (contains, starts-with, string-length) are
+    useful but belong in the validator library, not the schema
+    syntax.
+
+5.7 PRACTICAL TAKEAWAY
+
+NExT schemas don't need XPath's full power. They should support:
+
+  1. Path references     — Database/Pool/min, not just Pool.min
+  2. Sibling constraints — uniqueness, ordering among siblings
+  3. Parent context      — "Agent must be inside Pipeline"
+  4. Position/count      — "at least 2, at most 5"
+  5. Predicates          — conditional rules (if X then Y)
+  6. Wildcards           — constrain without enumerating
+
+These solve real validation problems without the complexity of
+a full query language.
+
+
+6. WHAT NExT NATURALLY PROVIDES
 ---------------------------------
 
 NExT's grammar already encodes the schema's core concepts:
@@ -157,14 +324,14 @@ No new format. No new syntax. The schema IS a NExT document
 with a meta-vocabulary of schema-level Nouns.
 
 
-6. THE DESIGN SPACE — KEY QUESTIONS
+7. THE DESIGN SPACE — KEY QUESTIONS
 -------------------------------------
 
 These are the questions that need real-world input. There are
 no universally correct answers.
 
 
-6.1 OPEN VS CLOSED WORLD
+7.1 OPEN VS CLOSED WORLD
 
   Open (JSON Schema default):
     Define what MUST be present. Extra stuff is allowed.
@@ -186,7 +353,7 @@ no universally correct answers.
   is opt-in.
 
 
-6.2 HOW STRICT ON VALUES?
+7.2 HOW STRICT ON VALUES?
 
   Loose:
     "port" is present and is an integer. Don't care about range.
@@ -206,7 +373,7 @@ no universally correct answers.
   needs. Regex patterns are the escape hatch for the other 5%.
 
 
-6.3 CARDINALITY — HOW MANY?
+7.3 CARDINALITY — HOW MANY?
 
   Simple:
     required(true/false), repeatable(true/false).
@@ -222,7 +389,7 @@ no universally correct answers.
   is rarely needed and adds complexity.
 
 
-6.4 ENUMS — SYMBOL VALUES
+7.4 ENUMS — SYMBOL VALUES
 
   NExT already has symbols (@cancel, @exit). Enums constrain
   which symbols are valid:
@@ -242,7 +409,7 @@ no universally correct answers.
   Symbols are more NExT-idiomatic but less practical.
 
 
-6.5 REUSABILITY — HOW TO SHARE TYPES?
+7.5 REUSABILITY — HOW TO SHARE TYPES?
 
   Inline:
     Define types where they're used. Simple but repetitive.
@@ -262,7 +429,7 @@ no universally correct answers.
   references can be added later if needed. YAGNI.
 
 
-6.6 COMPOSITION — MIXING SCHEMAS
+7.6 COMPOSITION — MIXING SCHEMAS
 
   JSON Schema has allOf, oneOf, anyOf. Do we need these?
 
@@ -281,7 +448,7 @@ no universally correct answers.
   Composition is powerful but adds significant complexity.
 
 
-6.7 ERROR MESSAGES — THE AUTHOR EXPERIENCE
+7.7 ERROR MESSAGES — THE AUTHOR EXPERIENCE
 
   The most underrated part of schema design. Bad error messages:
 
@@ -300,7 +467,7 @@ no universally correct answers.
   A schema that produces bad errors is worse than no schema.
 
 
-6.8 SELF-DESCRIBING — SCHEMAS IN NExT
+7.8 SELF-DESCRIBING — SCHEMAS IN NExT
 
   If schemas are NExT documents, then:
   - Schemas can be validated by the NExT parser
@@ -322,7 +489,7 @@ no universally correct answers.
   schema is just NExT. No grammar changes needed.
 
 
-7. MINIMUM VIABLE SCHEMA
+8. MINIMUM VIABLE SCHEMA
 ---------------------------
 
 If I had to ship a v1 schema system tomorrow, here's what
@@ -370,7 +537,7 @@ Not covered (v2):
   ✗ Additional properties control (beyond open/closed)
 
 
-8. WHAT I'D ASK EXPERIENCED DEVS
+9. WHAT I'D ASK EXPERIENCED DEVS
 -----------------------------------
 
   1. "Have you ever used JSON Schema in production? What
@@ -406,8 +573,16 @@ Not covered (v2):
   10. "Is there a schema system you've used that you'd
        recommend as a model? What made it work?"
 
+  11. "XPath shows that sibling and parent constraints solve
+       real problems. Do you need these in v1, or is child-only
+       validation enough?"
 
-9. MY BIASES
+  12. "How useful are conditional constraints (if X then Y)?
+       Do you have real configs where a value's validity depends
+       on another value's presence or value?"
+
+
+10. MY BIASES
 --------------
 
   - Schemas should be written by humans (or LLMs), not generated
@@ -430,7 +605,7 @@ Not covered (v2):
     config loading happens.
 
 
-10. NEXT STEPS
+11. NEXT STEPS
 ---------------
 
   1. Write a schema for a real NExT config (the Pipeline example
