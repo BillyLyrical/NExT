@@ -2,6 +2,8 @@ Revision history for NExT
 
 0.3.0 2026-09-08
     - Add Data::NExT::Template pre-processor
+    - Add Data::NExT::Util — tree traversal, extraction, building,
+      comparison, and validation utilities
     - Variable interpolation: ${VAR}, ${a/b/c} paths, ${A|B:default} chains
     - Host-language function registry (lowercase, registered callbacks)
     - Builtin functions: %Include, %OptInclude, %SearchPath, %Ifdef,
