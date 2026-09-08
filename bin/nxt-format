@@ -1,0 +1,98 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use Getopt::Long;
+use Pod::Usage;
+use FindBin;
+use lib "$FindBin::Bin/../lib";
+use Data::NExT;
+use Data::NExT::Util qw(to_text);
+
+my %opts = (
+    output  => '',
+    help    => 0,
+    version => 0,
+);
+
+GetOptions(
+    'o|output=s'   => \$opts{output},
+    'v|version'    => \$opts{version},
+    'h|help'       => \$opts{help},
+) or pod2usage(2);
+
+if ($opts{help}) {
+    pod2usage(-verbose => 2);
+}
+
+if ($opts{version}) {
+    print "nxt-format " . Data::NExT::Util->VERSION . "\n";
+    exit 0;
+}
+
+my $file = shift @ARGV;
+unless ($file && -f $file) {
+    warn "Error: no input file\n";
+    pod2usage(2);
+}
+
+open my $fh, '<', $file or die "Cannot open '$file': $!\n";
+my $input = do { local $/; <$fh> };
+close $fh;
+
+my $tree = Data::NExT::parse($input);
+if ($Data::NExT::ERROR) {
+    warn "Parse error: $Data::NExT::ERROR\n";
+    exit 1;
+}
+
+my $output = '';
+for my $node (@$tree) {
+    $output .= to_text($node);
+}
+
+if ($opts{output}) {
+    open my $out, '>', $opts{output} or die "Cannot write '$opts{output}': $!\n";
+    print $out $output;
+    close $out;
+} else {
+    print $output;
+}
+
+__END__
+
+=head1 NAME
+
+nxt-format - Pretty-print NExT files with consistent formatting
+
+=head1 SYNOPSIS
+
+  nxt-format [options] file.nx
+
+  Options:
+    -o, --output FILE   Write output to FILE (default: stdout)
+    -v, --version       Show version
+    -h, --help          Show this help
+
+=head1 DESCRIPTION
+
+nxt-format reads a NExT file, parses it, and re-emits it with
+consistent 4-space indentation and normalized whitespace. Useful
+for cleaning up hand-edited files and making diffs cleaner.
+
+=head1 EXAMPLES
+
+  nxt-format config.nx                    # stdout
+  nxt-format -o config.nx config.nx       # in-place (overwrite)
+  nxt-format -o clean.nx messy.nx         # write to new file
+
+=head1 AUTHOR
+
+Billy Lyrical
+
+=head1 LICENSE
+
+This library is free software. You can redistribute it and/or modify
+it under the same terms as Perl itself.
+
+=cut
