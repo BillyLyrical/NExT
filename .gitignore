@@ -5,3 +5,4 @@ Build/
 MYMETA.*
 META.*
 pm_to_blib
+_tmp/

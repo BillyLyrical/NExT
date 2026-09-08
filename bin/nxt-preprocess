@@ -1,0 +1,131 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use Getopt::Long;
+use Pod::Usage;
+use FindBin;
+use lib "$FindBin::Bin/../lib";
+use Data::NExT::Template;
+
+my %opts = (
+    output      => '',
+    vars        => [],
+    include     => [],
+    max_depth   => 10,
+    silent      => 0,
+    help        => 0,
+    version     => 0,
+);
+
+GetOptions(
+    'o|output=s'   => \$opts{output},
+    'D=s'          => sub { push @{$opts{vars}}, $_[1] },
+    'I=s'          => sub { push @{$opts{include}}, $_[1] },
+    'M=i'          => \$opts{max_depth},
+    's|silent'     => \$opts{silent},
+    'v|version'    => \$opts{version},
+    'h|help'       => \$opts{help},
+) or pod2usage(2);
+
+if ($opts{help}) {
+    pod2usage(-verbose => 2);
+}
+
+if ($opts{version}) {
+    print "nxt-preprocess " . Data::NExT::Template->VERSION . "\n";
+    exit 0;
+}
+
+my $file = shift @ARGV;
+unless ($file && -f $file) {
+    warn "Error: no input file\n" unless $opts{silent};
+    pod2usage(2);
+}
+
+# Parse -D vars
+my %cli_vars;
+for my $v (@{$opts{vars}}) {
+    if ($v =~ /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/) {
+        $cli_vars{$1} = $2;
+    } else {
+        warn "Warning: invalid variable format '$v' (expected NAME=VALUE)\n" unless $opts{silent};
+    }
+}
+
+# Read input
+open my $fh, '<', $file or die "Cannot open '$file': $!\n";
+my $input = do { local $/; <$fh> };
+close $fh;
+
+# Build pre-processor
+my $t = Data::NExT::Template->new(
+    cli_vars => \%cli_vars,
+    opts     => {
+        max_depth    => $opts{max_depth},
+        include_path => $opts{include},
+    },
+);
+
+# Preprocess
+my $output;
+eval {
+    $output = $t->preprocess($input);
+};
+if ($@) {
+    chomp $@;
+    warn "Error: $@\n" unless $opts{silent};
+    exit 1;
+}
+
+# Output
+if ($opts{output}) {
+    open my $out, '>', $opts{output} or die "Cannot write '$opts{output}': $!\n";
+    print $out $output;
+    close $out;
+} else {
+    print $output;
+}
+
+__END__
+
+=head1 NAME
+
+nxt-preprocess - Pre-process NExT template files
+
+=head1 SYNOPSIS
+
+  nxt-preprocess [options] file.nxt
+
+  Options:
+    -o, --output FILE   Write output to FILE (default: stdout)
+    -D NAME=VALUE       Define a variable (repeatable)
+    -I DIR              Add include search path (repeatable)
+    -M DEPTH            Max include depth (default: 10, 0: unlimited)
+    -s, --silent        Suppress warnings
+    -v, --version       Show version
+    -h, --help          Show this help
+
+=head1 DESCRIPTION
+
+nxt-preprocess reads a .nxt template file, expands all template
+syntax (variables, conditionals, includes, functions), and outputs
+pure NExT (.nx) ready for parsing.
+
+=head1 EXAMPLES
+
+  nxt-preprocess config.nxt > config.nx
+  nxt-preprocess -o output.nx -D PORT=3000 config.nxt
+  nxt-preprocess -I ./shared -M 20 main.nxt
+  nxt-preprocess -D ENV=production -D DB_HOST=prod.db app.nxt | nxt-validate schema.nxs
+
+=head1 AUTHOR
+
+Billy Lyrical
+
+=head1 LICENSE
+
+This library is free software. You can redistribute it and/or modify
+it under the same terms as Perl itself.
+
+=cut
