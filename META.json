@@ -1,0 +1,60 @@
+{
+  "abstract": "Lightweight parser for the NExT (Noun Expression Tree) format",
+  "author": [
+    "Billy Lyrical <billy.lyrical@gmail.com>"
+  ],
+  "dynamic_config": 0,
+  "generated_by": "ExtUtils::MakeMaker",
+  "license": [
+    "perl_5"
+  ],
+  "meta-spec": {
+    "url": "https://metacpan.org/pod/CPAN::Meta::Spec",
+    "version": "2"
+  },
+  "name": "Data-NExT",
+  "no_index": {
+    "directory": [
+      "t"
+    ]
+  },
+  "prereqs": {
+    "configure": {
+      "requires": {
+        "ExtUtils::MakeMaker": "0"
+      }
+    },
+    "runtime": {
+      "requires": {
+        "perl": "5.010"
+      }
+    },
+    "test": {
+      "requires": {
+        "Test::More": "0.96"
+      }
+    }
+  },
+  "provides": {
+    "Data::NExT": {
+      "file": "lib/Data/NExT.pm",
+      "version": "0.5.0"
+    },
+    "Data::NExT::Template": {
+      "file": "lib/Data/NExT/Template.pm",
+      "version": "0.1.0"
+    },
+    "Data::NExT::Util": {
+      "file": "lib/Data/NExT/Util.pm",
+      "version": "0.1.0"
+    }
+  },
+  "resources": {
+    "repository": {
+      "type": "git",
+      "url": "git@psycho:~/NExT.git",
+      "web": "https://github.com/banjo/NExT"
+    }
+  },
+  "version": "0.5.0"
+}

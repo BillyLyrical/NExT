@@ -1,58 +1,99 @@
-# NExT
+# Data::NExT
 
-A lightweight Perl parser for the [NExT (Noun Expression Tree) format](doc/NExT_spec.txt).
+Lightweight parser for the NExT (Noun Expression Tree) data format.
+
+## Synopsis
+
+```perl
+use Data::NExT;
+
+my $input = q{
+Window[
+    title("Settings")
+    width(500)
+    Box[
+        orientation("vertical")
+        Label[ text("Hello") ]
+    ]
+]
+};
+
+my $tree = Data::NExT::parse($input);
+die "Error: $Data::NExT::ERROR\n" if defined $Data::NExT::ERROR;
+
+for my $node (@$tree) {
+    print "$node->{name}\n" if $node->{type} eq 'noun';
+}
+```
+
+## Description
 
 NExT is a declarative, hierarchical data format designed for LL(1)
-single-pass parsing. It is purely declarative with no code, no logic,
-and no Turing-complete expressions.
+single-pass parsing. Purely declarative with no code, no logic, and
+no Turing-complete expressions.
 
-File extension: `.nx`
+```
+Token class   Bracket   Example
+-----------   -------   -------
+Noun          [ ]       Window, Agent, Box
+Adjective     ( )       title, name, subscribe
+Symbol        (none)    @cancel, @exit
+Comment       (none)    # this is a comment
+```
 
-## Quick Start
+## Value Types
 
-    use Data::NExT;
+```
+Type      Syntax                    Example
+------    ------                    -------
+String    "double-quoted"           "Hello"
+Heredoc   """triple-quoted"""       """multi-line
+                                     text"""
+Integer   decimal digits            42, 0, 1000
+Float     digits.digits             3.14, 0.5
+Boolean   true or false             true, false
+Symbol    @identifier               @cancel, @exit
+Noun      Noun[ content ]           Var[ bind("x") ]
+List      [ value ... ]             ["a" "b"], [1 2 3]
+```
 
-    my $tree = Data::NExT::parse(q{
-    Window[
-        title("Settings")
-        width(500)
-        Box[
-            orientation("vertical")
-            Label[ text("Hello") ]
-        ]
-    ]
-    });
-    die "Error: $Data::NExT::ERROR\n" if defined $Data::NExT::ERROR;
+## Modules
 
-## Format
+### Data::NExT
 
-Two structural token classes, distinguished by first character:
+Core parser. Zero dependencies.
 
-    First char   Token class   Bracket   Example
-    -----------  -----------   -------   -------
-    [A-Z]        Noun          [ ]       Window, Agent, Box
-    [a-z]        Adjective     ( )       title, name, subscribe
-    #            Comment       (none)    # this is a comment
+### Data::NExT::Template
 
-Values: `"strings"`, `42` (int), `3.14` (float), `true`/`false` (bool), `@symbol` (symbol), inline `Noun[ ]`, or lists `["a" "b"]`.
+Template pre-processor for `.nxt` files. Handles variable interpolation,
+function calls, conditionals, and file inclusion.
 
-## API
+### Data::NExT::Util
 
-### `Data::NExT::parse($input)`
+Tree utilities — traversal, extraction, building, comparison, validation.
 
-Returns a reference to an array of top-level noun nodes, or `undef` on
-error. On error, `$Data::NExT::ERROR` contains a human-readable message
-with line number.
+## CLI Tools
 
-Each node is a hashref:
+```
+nxt-preprocess    .nxt → .nx  (template expansion)
+nxt-format        .nx → .nx   (pretty-print)
+nxt-validate      .nx → exit code (validation)
+```
 
-    { type => 'noun', name => 'Window', children => [...], line => 1 }
-    { type => 'adj',  name => 'title',  value => {...},    line => 2 }
+## Installation
 
-## Running Tests
+```bash
+perl Makefile.PL
+make
+make test
+make install
+```
 
-    prove -v t/
+## Author
+
+Billy Lyrical
 
 ## License
 
-Artistic License 2.0. See [LICENSE](LICENSE).
+This library is free software. You can redistribute it and/or modify
+it under the same terms as Perl itself.
