@@ -27,7 +27,7 @@ NExT is built on two fundamental concepts:
   - LL(1): one-token lookahead determines the next parse action.
   - Hierarchical: nouns nest. Adjectives are leaves.
   - Two token classes: Nouns (CamelCase) and Adjectives (snake_case).
-  - Ground-truth values: adjectives hold Int, Float, String, Bool, or Symbol.
+  - Ground-truth values: adjectives hold Int, Float, String, Bool, Symbol, or List.
   - Human-readable: plain text, versionable with git.
   - LLM-generable: the grammar is simple enough for LLMs to produce valid output.
 
@@ -40,7 +40,9 @@ NExT is built on two fundamental concepts:
   noun         ::= NOUN '[' content ']'
   content      ::= ( block | adjective | comment )*     -- mixed, any order
   adjective    ::= ADJECTIVE '(' value ')'
-  value        ::= string | integer | float | boolean | symbol | noun
+  value        ::= string | integer | float | boolean | symbol | noun | list
+  list         ::= '[' list_content ']'
+  list_content ::= ( value )*                          -- values separated by whitespace
   comment      ::= '#' ( any )* newline
 
   -- Lexical tokens
@@ -68,9 +70,14 @@ the first character. This is the LL(1) decision point.
   [A-Z]        Noun          [ ]       Window, Agent, Box
   [a-z]        Adjective     ( )       title, name, subscribe
   #            Comment       (none)    # this is a comment
-  ]            Close         (none)    ends current Noun
+  ]            Close         (none)    ends current Noun or List
 
 Everything else at the start of a token position is a syntax error.
+
+Lists use bare brackets [ ]. In value context (after '('), the parser
+distinguishes lists from nouns by peeking at the token after '[':
+  - If followed by NOUN  -> noun (Noun[ ... ])
+  - If followed by value -> list ([ ... ])
 
 
 5. NOUNS (TYPES)
@@ -115,6 +122,7 @@ Examples:
   password(true)
   value(3.14)
   onclick("handle_click")
+  tags(["gui" "settings"])
 
 
 7. VALUES
@@ -131,16 +139,49 @@ interpolation, no code. The value types are:
   Boolean  true or false             true, false
   Symbol   @identifier               @cancel, @exit
   Noun     Noun[ content ]           Var[ bind("x") ]
+  List     [ value ... ]             ["a" "b"], [1 2 3]
 
 Strings use double quotes. Escape sequences: \\, \", \n, \t.
 Integers are non-negative (no leading zeros except for "0").
 Floats have exactly one decimal point.
 Booleans are lowercase literals.
-Symbols start with @ and are labeled references (see section 8).
+Symbols start with @ and are labeled references (see section 9).
 Nouns as values allow inline nesting: Var[ bind("x") default("0") ].
 
 
-8. SYMBOLS
+8. LISTS
+---------
+
+Lists are anonymous, flat collections of values. They use bare
+brackets [ ] in value context.
+
+Rules:
+- Delimited by [ and ].
+- Contain zero or more values separated by whitespace.
+- All items must be atomic values (string, integer, float,
+  boolean, symbol). Not nouns, not nested lists.
+- Homogeneous by convention (all items same type).
+- No trailing comma or separator required.
+
+Examples:
+
+  tags(["gui" "settings" "dialog"])
+  coords([1.0 2.5 3.3])
+  flags([true false true])
+  empty([])
+
+Lists are single values. An adjective holding a list still has
+exactly one value — the list itself:
+
+  tags( ["a" "b" "c"] )     # tags has ONE value: a list of 3 strings
+  tags("a" "b" "c")         # WRONG: adjectives take one value, not three
+
+Lists do NOT nest. There are no lists of lists. If you need
+structured groupings, use nouns — nouns are NExT's nesting
+mechanism.
+
+
+9. SYMBOLS
 ----------
 
 Symbols are labeled references. A symbol @key denotes a concept
@@ -164,7 +205,7 @@ Examples:
   Source[ name("source") ]           # definition by name (domain convention)
 
 
-9. COMMENTS
+10. COMMENTS
 -----------
 
 Lines starting with '#' are comments. Inline comments are also
@@ -175,7 +216,7 @@ supported after any token:
 Comments are ignored by the parser. They do not affect the tree.
 
 
-10. WHITESPACE
+11. WHITESPACE
 --------------
 
 Whitespace (spaces, tabs, newlines) is insignificant except:
@@ -186,7 +227,7 @@ Whitespace (spaces, tabs, newlines) is insignificant except:
 Indentation is for human readability only; it does not affect structure.
 
 
-11. NESTING
+12. NESTING
 ------------
 
 Nouns can contain other nouns, forming a tree. The nesting rules:
@@ -195,6 +236,17 @@ Nouns can contain other nouns, forming a tree. The nesting rules:
 - Content can contain adjectives, child nouns, and comments in any order.
 - Nesting depth is unlimited (practical limit: ~20 levels).
 - Siblings at the same level are independent.
+
+Lists cannot nest. If you need hierarchical structure, use nouns:
+
+  # flat list of values
+  tags(["a" "b" "c"])
+
+  # structured groupings use nouns
+  Agent[
+    name("critic")
+    Config[ quality_threshold(80) ]
+  ]
 
 Example with three levels of nesting:
 
@@ -212,7 +264,7 @@ Example with three levels of nesting:
   ]
 
 
-12. LL(1) PARSING
+13. LL(1) PARSING
 ------------------
 
 The parser is a single-pass recursive descent. The decision at each
@@ -223,29 +275,35 @@ point is made by looking at one character of lookahead:
   start of token   [A-Z]       parse noun (read until '[')
   start of token   [a-z]       parse adjective (read until '(')
   start of token   #            skip to end of line
-  start of token   ]            pop noun from stack
+  start of token   ]            pop noun or list from stack
   start of token   EOF          done
   anywhere         whitespace  skip
   anywhere         other       syntax error
+
+In value context (after '('), the parser also handles:
+  After (, [ followed by value  -> parse list
+  After (, [ followed by NOUN   -> parse inline noun
 
 The parser maintains a stack of open nouns. When it sees '[', it
 pushes. When it sees ']', it pops. No backtracking. O(n) time.
 
 
-13. AMBIGUITY RULES
+14. AMBIGUITY RULES
 ---------------------
 
   Issue                         Resolution
   ------                        ----------
   Noun without content          Window[ ] is valid (empty noun)
+  Empty list                    [] is valid (empty list)
   Adjective without value       Not allowed; syntax error
   Adjacent nouns                Both are children of the enclosing noun
   Mixed adj/noun order          Allowed; order is insignificant
   ] in a string                 Not possible (strings are delimited by ")
   Nested ]                      Handled by the stack (matching brackets)
+  [ as list vs noun             In value context: peek after [ to decide
 
 
-14. SCOPING AND REFERENCES
+15. SCOPING AND REFERENCES
 ---------------------------
 
 NExT trees are self-contained. There is no global scope, no
@@ -262,7 +320,7 @@ The parser sees "git-context.output" as a string. The runtime resolves
 the reference. The grammar does not enforce or check references.
 
 
-15. EXTENSION POINTS
+16. EXTENSION POINTS
 ---------------------
 
 The grammar is intentionally minimal. Domain-specific extensions are
@@ -279,7 +337,7 @@ New nouns and adjectives are added by defining them in the application.
 The grammar does not need to change.
 
 
-16. VALIDATION
+17. VALIDATION
 ---------------
 
 The parser validates:
@@ -289,6 +347,7 @@ The parser validates:
   - Nouns start with uppercase
   - Adjectives start with lowercase
   - Values are valid literals
+  - List items are atomic values (not nouns, not nested lists)
 
 The parser does NOT validate:
 
@@ -297,9 +356,10 @@ The parser does NOT validate:
   - Value types (application defines expected types)
   - Reference correctness (runtime resolves references)
   - Nesting depth (no limit at grammar level)
+  - List homogeneity (application defines expected item types)
 
 
-17. EXAMPLES
+18. EXAMPLES
 -------------
 
 GUI:
@@ -308,6 +368,7 @@ GUI:
     title("Settings")
     width(500)
     height(400)
+    tags(["gui" "settings" "dialog"])
     Box[
       orientation("vertical")
       Label[ text("Username") ]
@@ -355,14 +416,23 @@ Config:
     ]
   ]
 
+Lists:
 
-18. IMPLEMENTATION NOTES
+  Item[
+    name("file1")
+    tags(["source" "perl"])
+    versions([1 2 3])
+  ]
+
+
+19. IMPLEMENTATION NOTES
 --------------------------
 
-The parser is ~200 lines of Perl. Core data structure:
+The parser is ~250 lines of Perl. Core data structure:
 
   { type => 'noun', name => 'Window', children => [...], line => 1 }
   { type => 'adj', name => 'title', value => 'Settings', line => 2 }
+  { type => 'list', items => [...], line => 3 }
 
 Output is a tree of these nodes. The application walks the tree
 and interprets it according to its domain.

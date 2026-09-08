@@ -3,7 +3,7 @@ package Data::NExT;
 use strict;
 use warnings;
 
-our $VERSION = '0.1.1';
+our $VERSION = '0.2.0';
 our $ERROR;
 
 my $RE_NOUN  = qr/\G[A-Z][a-zA-Z0-9_]*/;
@@ -184,8 +184,35 @@ sub _parse_value {
     if ($tok eq 'NOUN') {
         return $self->_parse_object;
     }
+    if ($tok eq '[') {
+        my $saved = pos($self->{input});
+        pos($self->{input}) = $self->{pos} + 1;
+        my $is_noun = $self->{input} =~ $RE_NOUN && $+[0] > $self->{pos} + 1;
+        pos($self->{input}) = $saved;
+        if ($is_noun) {
+            return $self->_parse_object;
+        }
+        return $self->_parse_list;
+    }
     $ERROR = "line $self->{line}: expected value, got $tok";
     return undef;
+}
+
+sub _parse_list {
+    my ($self) = @_;
+    my $line = $self->{line};
+    $self->{pos}++; # skip [
+    my @items;
+    while (1) {
+        $self->_skip_ws;
+        my $tok = $self->_peek;
+        last if $tok eq ']' || $tok eq 'EOF';
+        my $val = $self->_parse_value;
+        return undef unless defined $val;
+        push @items, $val;
+    }
+    return undef unless $self->_expect(']');
+    return { type => 'list', items => \@items, line => $line };
 }
 
 sub _parse_object {
@@ -310,6 +337,7 @@ Value nodes for adjectives:
     { type => 'boolean', value => 1,       line => 5 }  # 1=true, 0=false
     { type => 'symbol',  value => '@foo',  line => 6 }
     { type => 'noun',    name => 'Var', children => [...], line => 7 }
+    { type => 'list',    items => [...],  line => 8 }
 
 =head1 AUTHOR
 

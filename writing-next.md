@@ -35,13 +35,14 @@ Pipeline[
 
 1. Nouns: `[A-Z][a-zA-Z0-9_]*` — CamelCase
 2. Adjectives: `[a-z][a-zA-Z0-_-]*` — snake_case
-3. Values: `"string"`, `42`, `3.14`, `true`, `false`, `@symbol`, or inline `Noun[ ]`
-4. Strings use double quotes. Escape: `\"`, `\\`, `\n`, `\t`
-5. Comments start with `#`
-6. No code, no expressions, no interpolation — just data
-7. Whitespace is insignificant (indent for readability)
-8. Nouns can be empty: `Window[ ]`
-9. Adjectives and child nouns can be mixed in any order
+3. Values: `"string"`, `42`, `3.14`, `true`, `false`, `@symbol`, inline `Noun[ ]`, or lists `["a" "b"]`
+4. Lists: `[ val1 val2 ]` — flat, atomic values only, no nesting
+5. Strings use double quotes. Escape: `\"`, `\\`, `\n`, `\t`
+6. Comments start with `#`
+7. No code, no expressions, no interpolation — just data
+8. Whitespace is insignificant (indent for readability)
+9. Nouns can be empty: `Window[ ]`
+10. Adjectives and child nouns can be mixed in any order
 
 ## Common mistakes
 
@@ -57,4 +58,5 @@ Pipeline[
 - Nesting depth is unlimited but keep it readable (≤10 levels)
 - Use comments liberally: `# configuration section`
 - Each adjective holds exactly one value
+- Lists are flat and atomic: `["a" "b" "c"]` not `[["a"]]`
 - Multiple nouns at the same level are siblings

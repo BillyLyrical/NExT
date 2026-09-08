@@ -1,5 +1,10 @@
 Revision history for NExT
 
+0.2.0 2026-09-08
+    - Add anonymous lists: bare [ ] syntax for flat value collections
+    - Lists are atomic, homogeneous, non-nesting
+    - Nouns are the mechanism for structured/nested data (dicts)
+
 0.1.1 2026-09-08
     - Optimize parser with pre-compiled \G regexes (~30% faster)
     - Replace char-by-char token reading with anchored regex matches

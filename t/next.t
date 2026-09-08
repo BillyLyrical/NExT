@@ -350,4 +350,109 @@ EOF
     is($outer->{children}[1]{name}, 'B');
 }
 
+# --- Empty list ---
+
+{
+    my $tree = Data::NExT::parse('X[ items([]) ]');
+    my $adj = $tree->[0]{children}[0];
+    is($adj->{type}, 'adj');
+    is($adj->{name}, 'items');
+    is($adj->{value}{type}, 'list');
+    is(scalar @{$adj->{value}{items}}, 0, 'empty list: zero items');
+}
+
+# --- List of strings ---
+
+{
+    my $tree = Data::NExT::parse('X[ tags(["gui" "settings" "dialog"]) ]');
+    my $list = $tree->[0]{children}[0]{value};
+    is($list->{type}, 'list');
+    is(scalar @{$list->{items}}, 3, 'string list: three items');
+    is($list->{items}[0]{type}, 'string');
+    is($list->{items}[0]{value}, 'gui');
+    is($list->{items}[1]{value}, 'settings');
+    is($list->{items}[2]{value}, 'dialog');
+}
+
+# --- List of integers ---
+
+{
+    my $tree = Data::NExT::parse('X[ nums([1 2 3]) ]');
+    my $list = $tree->[0]{children}[0]{value};
+    is($list->{type}, 'list');
+    is(scalar @{$list->{items}}, 3, 'int list: three items');
+    is($list->{items}[0]{type}, 'integer');
+    is($list->{items}[0]{value}, 1);
+    is($list->{items}[1]{value}, 2);
+    is($list->{items}[2]{value}, 3);
+}
+
+# --- List of floats ---
+
+{
+    my $tree = Data::NExT::parse('X[ coords([1.0 2.5 3.3]) ]');
+    my $list = $tree->[0]{children}[0]{value};
+    is(scalar @{$list->{items}}, 3);
+    is($list->{items}[0]{type}, 'float');
+    is($list->{items}[0]{value}, 1.0);
+    is($list->{items}[2]{value}, 3.3);
+}
+
+# --- List of booleans ---
+
+{
+    my $tree = Data::NExT::parse('X[ flags([true false true]) ]');
+    my $list = $tree->[0]{children}[0]{value};
+    is(scalar @{$list->{items}}, 3);
+    is($list->{items}[0]{type}, 'boolean');
+    is($list->{items}[0]{value}, 1);
+    is($list->{items}[1]{value}, 0);
+}
+
+# --- List of symbols ---
+
+{
+    my $tree = Data::NExT::parse('X[ syms([@a @b @c]) ]');
+    my $list = $tree->[0]{children}[0]{value};
+    is(scalar @{$list->{items}}, 3);
+    is($list->{items}[0]{type}, 'symbol');
+    is($list->{items}[0]{value}, '@a');
+    is($list->{items}[2]{value}, '@c');
+}
+
+# --- List with comments between items ---
+
+{
+    my $tree = Data::NExT::parse("X[ items([ # first\n\"a\" # second\n\"b\" ]) ]");
+    my $list = $tree->[0]{children}[0]{value};
+    is(scalar @{$list->{items}}, 2, 'list with comments: two items');
+    is($list->{items}[0]{value}, 'a');
+    is($list->{items}[1]{value}, 'b');
+}
+
+# --- List inside nested noun ---
+
+{
+    my $tree = Data::NExT::parse('Outer[ Inner[ tags(["a" "b"]) ] ]');
+    my $inner = $tree->[0]{children}[0];
+    is($inner->{name}, 'Inner');
+    my $list = $inner->{children}[0]{value};
+    is($list->{type}, 'list');
+    is(scalar @{$list->{items}}, 2);
+}
+
+# --- Mixed nouns and lists at top level ---
+
+{
+    my $input = <<'EOF';
+Item[ name("a") tags(["x" "y"]) ]
+Item[ name("b") tags(["z"]) ]
+EOF
+    my $tree = Data::NExT::parse($input);
+    is(scalar @$tree, 2, 'two items with lists');
+    is($tree->[0]{children}[1]{value}{type}, 'list');
+    is(scalar @{$tree->[0]{children}[1]{value}{items}}, 2);
+    is(scalar @{$tree->[1]{children}[1]{value}{items}}, 1);
+}
+
 done_testing();

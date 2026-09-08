@@ -34,7 +34,7 @@ Two structural token classes, distinguished by first character:
     [a-z]        Adjective     ( )       title, name, subscribe
     #            Comment       (none)    # this is a comment
 
-Values: `"strings"`, `42` (int), `3.14` (float), `true`/`false` (bool), `@symbol` (symbol), or inline `Noun[ ]`.
+Values: `"strings"`, `42` (int), `3.14` (float), `true`/`false` (bool), `@symbol` (symbol), inline `Noun[ ]`, or lists `["a" "b"]`.
 
 ## API
 
