@@ -1,0 +1,118 @@
+NExT QUICK REFERENCE
+======================
+
+File extensions: .nx (NExT)  .nxt (template)
+
+
+GRAMMAR
+--------
+
+  Noun        [A-Z][a-zA-Z0-9_]*  — type/structural element
+  Adjective   [a-z][a-zA-Z0-_-]*  — attribute/property
+  Symbol      @[a-zA-Z_][a-zA-Z0-9_]*  — labeled reference
+  Comment     # ... to end of line
+
+  Brackets:   Noun[ ... ]    Adjective( value )
+  Nesting:    Nouns contain adjectives and child nouns
+
+
+VALUE TYPES
+------------
+
+  String    "double-quoted"      "hello", "git.diff"
+  Integer   42, 0, 1000
+  Float     3.14, 0.5
+  Boolean   true, false
+  Symbol    @cancel, @exit
+  Noun      Var[ bind("x") ]    (inline nested noun)
+  List      ["a" "b" "c"]       [1 2 3]  [true false]
+
+
+EXAMPLES
+---------
+
+  Window[
+      title("Settings")
+      width(500)
+      Box[
+          orientation("vertical")
+          Label[ text("Hello") ]
+      ]
+  ]
+
+  Agent[
+      name("critic")
+      subscribe("git.diff.ready")
+  ]
+
+
+TEMPLATE SYNTAX (.nxt files)
+------------------------------
+
+  ${NAME}                  variable (CLI → hashref → ENV → default)
+  ${a/b/c}                 path variable (hashref nesting)
+  ${A|B|C:default}         fallback chain
+  ${NAME:fallback}         variable with default
+
+  %Include("file.nx")      include (error if missing)
+  %OptInclude("file.nx")   optional include (silent if missing)
+  %SearchPath("dir")       add include search path
+
+  %Ifdef("VAR")            conditional (set and non-empty)
+  %Ifndef("VAR")           inverse conditional
+  %Else                    alternate branch
+  %Endif                   close conditional
+
+  %Ignore ... %EndIgnore   strip block entirely
+
+  %Env("NAME")             explicit ENV lookup
+  %Var("a/b/c")            explicit hashref lookup
+
+  %func                    host function call (lowercase)
+  %Func("args")            builtin function (Capitalized)
+
+
+CLI TOOLS
+----------
+
+  nxt-preprocess [opts] file.nxt     .nxt → .nx
+    -o FILE          output file (default: stdout)
+    -D NAME=VALUE    define variable (repeatable)
+    -I dir           include path (repeatable)
+    -M depth         max include depth (default: 10)
+
+  nxt-format [opts] file.nx          pretty-print
+    -o FILE          output file (default: stdout)
+
+  nxt-validate [opts] file.nx        validate syntax
+    -V               verbose output
+    exit 0 = valid, exit 1 = invalid
+
+
+PERL API
+---------
+
+  use Data::NExT;
+  my $tree = Data::NExT::parse($input);
+
+  use Data::NExT::Util qw(find to_hash to_text tree);
+  my @agents = @{ find($tree, 'Agent') };
+  my $hash   = to_hash($tree->[0]);
+  my $text   = to_text($tree->[0]);
+
+  use Data::NExT::Template;
+  my $t = Data::NExT::Template->new(
+      config    => { db_host => 'localhost' },
+      functions => { hostname => sub { `hostname -s` } },
+      cli_vars  => { PORT => '3000' },
+  );
+  my $nxt = $t->preprocess($template_text);
+
+
+FULL DOCUMENTATION
+-------------------
+
+  doc/NExT_spec.txt          formal grammar spec
+  doc/NExT_Template.txt      template pre-processor spec
+  doc/NExT_AI_Hint.md        LLM writing guide
+  doc/NExT_Schema_Discussion.txt  schema validation discussion
