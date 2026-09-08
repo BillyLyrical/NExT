@@ -9,7 +9,8 @@ use Data::NExT::Util qw(find find_adj find_first walk
     tree
     where
     equals diff
-    require_adj require_child validate);
+    require_adj require_child validate
+    check_refs);
 
 # --- find ---
 
@@ -310,6 +311,37 @@ use Data::NExT::Util qw(find find_adj find_first walk
     my $text = to_text($node);
     my $reparsed = Data::NExT::parse($text);
     ok(equals($node, $reparsed->[0]), 'tree builder + to_text roundtrip');
+}
+
+# --- check_refs ---
+
+{
+    my $tree = Data::NExT::parse('Button[ text(@cancel) ]');
+    my $result = check_refs($tree);
+    is(scalar @{$result->{warnings}}, 1, 'check_refs: one warning for single symbol');
+    like($result->{warnings}[0], qr/\@cancel appears only once/, 'check_refs: warns about @cancel');
+    is(scalar @{$result->{errors}}, 0, 'check_refs: no errors');
+}
+
+{
+    my $tree = Data::NExT::parse('Button[ text(@cancel) ] Translate[ @cancel("Annuler") ]');
+    my $result = check_refs($tree);
+    is(scalar @{$result->{warnings}}, 0, 'check_refs: no warning for defined symbol');
+    is(scalar @{$result->{errors}}, 0, 'check_refs: no errors');
+}
+
+{
+    my $tree = Data::NExT::parse('A[ x(@foo) y(@bar) ] B[ z(@foo) ]');
+    my $result = check_refs($tree);
+    is(scalar @{$result->{warnings}}, 1, 'check_refs: @foo ok, @bar single');
+    like($result->{warnings}[0], qr/\@bar/, 'check_refs: warns about @bar');
+}
+
+{
+    my $tree = Data::NExT::parse('X[ a("hello") b(42) ]');
+    my $result = check_refs($tree);
+    is(scalar @{$result->{warnings}}, 0, 'check_refs: no symbols = no warnings');
+    is(scalar @{$result->{errors}}, 0, 'check_refs: no errors');
 }
 
 done_testing();

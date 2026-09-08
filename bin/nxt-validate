@@ -7,19 +7,22 @@ use Pod::Usage;
 use FindBin;
 use lib "$FindBin::Bin/../lib";
 use Data::NExT;
+use Data::NExT::Util qw(check_refs);
 
 my %opts = (
-    file_arg => '',
-    verbose  => 0,
-    help     => 0,
-    version  => 0,
+    file_arg   => '',
+    verbose    => 0,
+    strict_ref => 0,
+    help       => 0,
+    version    => 0,
 );
 
 GetOptions(
-    'f|file=s'     => \$opts{file_arg},
-    'version'      => \$opts{version},
-    'V|verbose'    => \$opts{verbose},
-    'h|help'       => \$opts{help},
+    'f|file=s'       => \$opts{file_arg},
+    'version'        => \$opts{version},
+    'V|verbose'      => \$opts{verbose},
+    'strict-refs'    => \$opts{strict_ref},
+    'h|help'         => \$opts{help},
 ) or pod2usage(2);
 
 if ($opts{help}) {
@@ -48,6 +51,28 @@ if ($Data::NExT::ERROR) {
     exit 1;
 }
 
+# Symbol reference checking
+my $refs = check_refs($tree);
+my $had_issues = 0;
+
+for my $w (@{$refs->{warnings}}) {
+    if ($opts{strict_ref}) {
+        warn "ERROR: $file: $w\n";
+        $had_issues = 1;
+    } else {
+        warn "WARN: $file: $w\n" if $opts{verbose};
+    }
+}
+
+for my $e (@{$refs->{errors}}) {
+    warn "ERROR: $file: $e\n";
+    $had_issues = 1;
+}
+
+if ($had_issues) {
+    exit 1;
+}
+
 if ($opts{verbose}) {
     my $count = scalar @$tree;
     print "OK: $file ($count top-level noun" . ($count == 1 ? '' : 's') . ")\n";
@@ -73,7 +98,8 @@ nxt-validate - Validate NExT files
 
   Options:
     -f, --file FILE     Input file (alternative to positional arg)
-    -V, --verbose       Show parse results
+    -V, --verbose       Show parse results and warnings
+    --strict-refs       Error on undefined symbols (single-occurrence)
     -v, --version       Show version
     -h, --help          Show this help
 

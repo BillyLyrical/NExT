@@ -13,6 +13,7 @@ our @EXPORT_OK = qw(
     where
     diff equals
     require_adj require_child validate
+    check_refs
 );
 
 # --- Traversal ---
@@ -385,6 +386,38 @@ sub _validate_node {
             push @$errors, "$node->{name}: invalid value (not a value node)";
         }
     }
+}
+
+# --- Symbol reference checking ---
+
+sub check_refs {
+    my ($tree) = @_;
+    $tree = [$tree] unless ref $tree eq 'ARRAY';
+
+    my %counts;
+    walk($tree, sub {
+        my $node = shift;
+        if ($node->{type} eq 'adj' && $node->{value}
+            && ref $node->{value} eq 'HASH'
+            && $node->{value}{type} eq 'symbol')
+        {
+            my $name = $node->{value}{value};
+            $name =~ s/^@//;
+            $counts{$name} //= { count => 0, line => $node->{line} };
+            $counts{$name}{count}++;
+        }
+    });
+
+    my @warnings;
+    my @errors;
+    for my $name (sort keys %counts) {
+        my $info = $counts{$name};
+        if ($info->{count} == 1) {
+            push @warnings, "symbol \@$name appears only once (line $info->{line}): possibly undefined";
+        }
+    }
+
+    return { warnings => \@warnings, errors => \@errors };
 }
 
 1;
