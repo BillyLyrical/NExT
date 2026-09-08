@@ -134,6 +134,8 @@ interpolation, no code. The value types are:
   Type     Syntax                    Examples
   ------   ------                    --------
   String   "double-quoted"           "Hello", "git.diff.ready"
+  Heredoc  """triple-quoted"""       """multi-line
+                                     text"""
   Integer  decimal digits            42, 0, 1000
   Float    digits.digits             3.14, 0.5
   Boolean  true or false             true, false
@@ -142,6 +144,8 @@ interpolation, no code. The value types are:
   List     [ value ... ]             ["a" "b"], [1 2 3]
 
 Strings use double quotes. Escape sequences: \\, \", \n, \t.
+Heredocs use triple quotes for multi-line strings. No escaping
+needed inside. The closing """ must be on its own line.
 Integers are non-negative (no leading zeros except for "0").
 Floats have exactly one decimal point.
 Booleans are lowercase literals.

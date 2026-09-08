@@ -20,6 +20,8 @@ VALUE TYPES
 ------------
 
   String    "double-quoted"      "hello", "git.diff"
+  Heredoc   """triple-quoted"""  """multi-line
+            """                  text"""
   Integer   42, 0, 1000
   Float     3.14, 0.5
   Boolean   true, false

@@ -1,5 +1,14 @@
 Revision history for NExT
 
+0.5.0 2026-09-08
+    - Add heredoc (triple-quoted) strings: """..."""
+    - Multi-line strings with no escaping needed
+    - Add check_refs() for symbol reference validation
+    - Add nxt-format and nxt-validate CLI tools
+    - Add Vim and VS Code syntax highlighting
+    - Add real-world example configs
+    - Add quick reference card
+
 0.3.0 2026-09-08
     - Add Data::NExT::Template pre-processor
     - Add Data::NExT::Util — tree traversal, extraction, building,
