@@ -3,7 +3,7 @@ package Data::NExT;
 use strict;
 use warnings;
 
-our $VERSION = '0.2.0';
+our $VERSION = '0.3.0';
 our $ERROR;
 
 my $RE_NOUN  = qr/\G[A-Z][a-zA-Z0-9_]*/;

@@ -3,9 +3,11 @@ doc/NExT_spec.txt
 doc/NExT_Template.txt
 doc/NExT_AI_Hint.md
 lib/Data/NExT.pm
+lib/Data/NExT/Template.pm
 LICENSE
 Makefile.PL
 MANIFEST			This list of files
 README.md
 t/next.t
+t/template.t
 VERSION

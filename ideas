@@ -1,0 +1,62 @@
+
+
+
+2. Enum literals — size(@small)
+A special case of symbol. Currently @small is an opaque reference. The grammar could distinguish @enum (must
+be defined in the document) from @ref (resolves at runtime). Linguistically this is like a proper noun vs a
+pronoun.
+
+3. Optional adjective marker — password?("secret")
+The ? suffix says "this adjective may be absent." Currently the spec has no way to express optionality — the
+application just ignores missing adjectives. This is useful for schema-like descriptions where you want to
+declare what could be there.
+
+4. Type annotation on adjectives — port(int 5432)
+A lightweight type hint. The value is still a literal, but the type is declared alongside it. This is like
+adjective classification in linguistics (gradable vs non-gradable). Useful for validation without adding a
+separate schema layer.
+
+5. Multi-line strings — """..."""
+The grammar already supports \n in strings, but large blocks (descriptions, templates) are painful. Triple-
+quoted strings are a common extension. Keeps everything literal — no interpolation.
+
+6. Backtick expressions —  `echo $name`
+NOT evaluated by the parser. Stored as { type => 'expr', value => 'echo $name' }. The application decides
+whether to eval. This is the linguistic notion of reported speech — "I'm telling you what to run, not running
+it myself." Separates declaration from execution cleanly.
+
+
+
+Pre-processing layer (NOT in the grammar)
+
+7. Variable interpolation — "Hello $name" or $name
+You're right: this is a substitution that should happen before parsing. The user writes $name in a template, a
+pre-processor fills it in, then NExT parses the result. Putting it in the grammar would make NExT a templating
+language, which violates the "purely declarative" principle.
+
+8. Include/import — @import "base.nx"
+File-level composition. Better handled by the application loading and concatenating files before parsing.
+Keeps NExT self-contained per document.
+
+9. Macros/templates — define Widget[ ... ] / Widget[ ]
+Macro expansion is a compile-time transformation. The application expands macros, then NExT parses the result.
+Same reasoning as variables.
+
+10. Namespace prefixes — gui:Window[ ]
+The application can already map namespace-qualified nouns to domain objects. Adding it to the grammar couples
+NExT to a naming convention.
+
+---
+
+The interesting gray area
+
+11. Reference syntax refinement — @key vs @key.type
+Currently symbols are flat identifiers. If you wanted hierarchical references (like @agent.critic.output),
+that's a grammar change. But is it worth the complexity? Probably not — the application can parse @agent.
+critic.output as a string-valued symbol today.
+
+12. Adjective groups — Window[ { title("Settings") width(500) } ]
+Braces group adjectives into a sub-record. Useful for "this set of adjectives goes together." But this starts
+to look like JSON嵌套, and the noun nesting already handles structure.
+
+

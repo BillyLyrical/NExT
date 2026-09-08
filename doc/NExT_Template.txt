@@ -2,16 +2,16 @@ NExT TEMPLATE SPECIFICATION
 =============================
 
 Status: specification. The NExT Template pre-processor handles variable
-interpolation, command substitution, and file inclusion before the
-NExT parser sees the data.
+interpolation, function calls, conditional inclusion, and file inclusion
+before the NExT parser sees the data.
 
 
 1. NAME
 -------
 
-NExT Templates are pre-processed NExT files with variable
-interpolation, command substitution, and file inclusion. The
-pre-processor expands all template syntax and outputs pure NExT.
+NExT Templates are pre-processed NExT files with variable interpolation,
+host-language function calls, conditional blocks, and file inclusion.
+The pre-processor expands all template syntax and outputs pure NExT.
 
 File extension: .nxt
 
@@ -24,13 +24,21 @@ Templates are a thin text layer on top of NExT:
   - Pre-processing is text substitution, not parsing.
   - The output is always valid NExT.
   - The NExT parser never sees template syntax.
-  - No loops, no functions, no expressions. Fill in blanks and get out.
-  - Variables come from the environment or the command line.
-  - Command substitution runs shell commands and inserts output.
+  - No loops, no general expressions. Fill in blanks, call functions,
+    and get out.
+  - Variables resolve from three sources: CLI overrides, then
+    host-language hashref, then environment. Defaults as fallback.
+  - Function calls are routed to host-language implementations.
+    No raw shell execution.
   - File inclusion inlines file contents before parsing.
+  - All template directives use the % prefix. This avoids collision
+    with NExT's @ symbol namespace.
+  - Builtins are Capitalized. Host functions are lowercase. Case
+    determines ownership.
 
-The pre-processor is a separate tool. Data::NExT::Template implements
-the logic. The parser (Data::NExT) is unchanged.
+The pre-processor is a separate tool. Each host language implements
+its own pre-processor (Data::NExT::Template for Perl, next_template
+for Python, etc.). The parser (Data::NExT) is unchanged.
 
 
 3. SYNTAX
@@ -41,27 +49,53 @@ Templates add these constructs to NExT text:
   Construct        Syntax              Example
   ---------        ------              -------
   Variable         ${NAME}             ${HOME}
-  Default value    ${NAME:-default}    ${PORT:-5432}
-  Command          `command`           `hostname`
-  Include          @include "file"     @include "base.nx"
-  Conditional      #ifdef NAME         #ifdef DEBUG
-                   #ifndef NAME        #ifndef PRODUCTION
-                   #else               #else
-                   #endif              #endif
+  Path variable    ${a/b/c}            ${db/host}
+  Default value    ${NAME:default}     ${PORT:5432}
+  Fallback chain   ${A|B|C:default}    ${HOST|SERVER:localhost}
+  Include          %Include("file")    %Include("base.nx")
+  Opt. include     %OptInclude("file") %OptInclude("optional.nx")
+  Search path      %SearchPath("dir")  %SearchPath("includes")
+  Ignore block     %Ignore             %Ignore
+                   %EndIgnore          %EndIgnore
+  Conditional      %Ifdef("NAME")     %Ifdef("DEBUG")
+                   %Ifndef("NAME")    %Ifndef("PRODUCTION")
+                   %Else               %Else
+                   %Endif              %Endif
+  Explicit ENV     %Env("NAME")       %Env("HOSTNAME")
+  Explicit hash    %Var("a/b/c")      %Var("db/host")
+  Host function    %name               %hostname
+  Host function    %name(args...)      %ReadFile("schema.nx")
 
 Everything else is literal NExT text, passed through unchanged.
+
+The % prefix is reserved for template directives. It is not part of
+the NExT grammar. The pre-processor strips all % directives before
+the parser sees the text.
+
+Builtin functions are Capitalized (%Include, %Ifdef, %Env, %Var).
+Host-language functions are lowercase (%hostname, %read-file).
+Case is the namespace boundary — you can tell ownership at a glance.
 
 
 4. VARIABLE INTERPOLATION
 ---------------------------
 
-Variables are expanded from the environment or command-line
-definitions. Syntax: ${NAME} or ${NAME:-default}.
+Variables are resolved from multiple sources with a strict priority
+order. Syntax: ${NAME} or ${NAME:default}.
+
+Resolution order (highest priority wins):
+
+  1. CLI definitions       -D NAME=value
+  2. Host-language hashref { NAME => "value" }
+  3. Environment variables  $ENV{NAME}
+  4. Default value          ${NAME:fallback}
 
 Rules:
-- ${NAME} expands to the value of environment variable NAME.
-- If NAME is not set, ${NAME} expands to empty string.
-- ${NAME:-default} expands to NAME if set, otherwise "default".
+- ${NAME} checks CLI, then hashref, then ENV, in order. First
+  match wins.
+- If no source has NAME, and no default is specified, ${NAME}
+  expands to empty string.
+- ${NAME:default} uses "default" only if all three sources miss.
 - Variables are expanded inside strings, comments, and bare text.
 - Variables are NOT expanded inside NExT value positions that
   would change the parse tree (e.g., inside noun names).
@@ -71,63 +105,384 @@ Examples:
 
   # input
   host("${HOSTNAME}")
-  port(${PORT:-5432})
-  name("${USER:-anonymous}")
+  port(${PORT:5432})
+  name("${USER:anonymous}")
 
-  # with HOSTNAME=psycho, PORT unset, USER=billy
+  # with HOSTNAME=psycho via ENV, PORT unset, USER=billy via hashref
   host("psycho")
   port(5432)
   name("billy")
 
+  # CLI overrides everything
+  # nxt-preprocess -D PORT=3000 ...
+  port(3000)
 
-5. COMMAND SUBSTITUTION
-------------------------
 
-Commands are executed and their stdout is inserted. Syntax: `command`.
+4.1 PATH VARIABLES (HASHREF NESTING)
+--------------------------------------
+
+Path variables access nested hashref structures using / as the
+delimiter. Syntax: ${a/b/c}.
 
 Rules:
-- The command runs in /bin/sh (or the system shell).
-- Trailing newline is stripped from output.
-- stderr goes to the pre-processor's stderr, not the output.
-- Commands run during pre-processing, not at parse time.
-- Command output is inserted as raw text, no escaping.
-- If the command fails (non-zero exit), the pre-processor
-  warns but still inserts the empty output.
+- Paths resolve against the host-language hashref ONLY.
+- Paths do NOT check ENV. ENV is flat — use ${FLAT_KEY} for ENV.
+- Paths do check CLI (-D) for the full path string first.
+- Resolution: CLI(-D "a/b/c") → hashref["a"]["b"]["c"] → default.
+- The host language implements the path traversal.
+
+Examples:
+
+  # Perl hashref
+  my $config = {
+      db => {
+          host => "localhost",
+          pool => { min => 5, max => 20 },
+      },
+      agents => {
+          critic => { name => "critic" },
+      },
+  };
+
+  # template
+  host("${db/host}")
+  min("${db/pool/min}")
+  agent("${agents/critic/name}")
+
+  # output
+  host("localhost")
+  min("5")
+  agent("critic")
+
+  # with CLI override
+  # nxt-preprocess -D "db/host=production.db.example.com" ...
+  host("production.db.example.com")
+
+Path variables with defaults:
+
+  ${db/host:localhost}           # hashref miss → use default
+  ${db/timeout:30}               # hashref miss → use default
+
+Why hashref-only for paths?
+  ENV is flat key-value. Paths imply structure. Mixing them creates
+  impedance mismatches (should ENV use / in keys? underscores? dots?).
+  Keeping paths hashref-only is clean: ENV gives you flat config,
+  hashref gives you structured data.
+
+
+4.2 FALLBACK CHAINS
+---------------------
+
+Fallback chains try multiple variable names in order, using | as
+the separator. Syntax: ${VAR1|VAR2|VAR3:default}.
+
+Rules:
+- Variables are tried left to right. First match wins.
+- Each variable name goes through the full source chain
+  (CLI → hashref → ENV) before trying the next name.
+- The default after : is used only if ALL names miss.
+- Fallback chain names must be flat (no / paths). Paths and
+  fallback chains are different operations.
+- If no default and all names miss, expands to empty string.
 
 Examples:
 
   # input
-  version( `git describe --tags --always` )
-  timestamp( `date -u +%Y-%m-%dT%H:%M:%SZ` )
-  host( `hostname -s` )
+  host("${HOST|SERVER:localhost}")
+  user("${ADMIN|USER:anonymous}")
 
-  # output (on git repo at tag v0.2.0)
-  version("v0.2.0")
-  timestamp("2026-09-08T12:00:00Z")
-  host("psycho")
+  # with HOST=web01 via ENV, ADMIN unset, USER=billy via hashref
+  host("web01")
+  user("billy")
+
+  # with HOST and SERVER both unset
+  host("localhost")
+  user("anonymous")
+
+  # CLI override — nxt-preprocess -D HOST=prod-01 ...
+  host("prod-01")
+
+Why fallback chains?
+  Deployment configs often have naming variations across environments.
+  HOST vs SERVER_HOST vs NEXTHOST. Fallback chains let the template
+  try multiple names without nesting multiple ${} or host-language
+  logic. The template stays declarative; the host language doesn't
+  need to pre-flatten config names.
+
+
+4.3 EXPLICIT SOURCE ACCESS
+----------------------------
+
+%Builtin functions for when you need to force a specific source:
+
+  %Env("NAME")    ENV only. Bypasses CLI and hashref.
+  %Var("a/b/c")   Hashref only. Bypasses CLI and ENV.
+
+These are escape hatches. Most templates use ${VAR} and don't care
+about the source. Use %Env or %Var when you specifically need one.
+
+Examples:
+
+  # Always from ENV, even if hashref has it
+  deploy_env( %Env("DEPLOY_ENV") )
+
+  # Always from hashref, even if ENV has it
+  secret( %Var("db/password") )
+
+  # Normal resolution (CLI → hashref → ENV → default)
+  host("${HOSTNAME}")
+
+
+5. FUNCTION CALLS
+-------------------
+
+Functions return text that is substituted into the template.
+The host language controls what functions exist and what they do.
+
+Two namespaces, determined by case:
+
+  Capitalized    Builtins — always available, engine-provided.
+  lowercase      Host functions — registered by the host language.
+
+Syntax:
+
+  %Builtin                # no arguments (e.g. %Hostname)
+  %Builtin("args")        # with arguments (e.g. %Include("file.nx"))
+  %host-func              # no arguments (e.g. %hostname)
+  %host-func("args")      # with arguments (e.g. %ReadFile("file.nx"))
+
+Arguments are:
+- Quoted strings: "hello"
+- Numbers: 42, 3.14
+- Variables: ${NAME}
+- Nested function calls: %OtherFunc("...")
+
+Rules:
+- Builtins: names are [A-Z][a-zA-Z0-9_]*.
+- Host functions: names follow adjective syntax [a-z][a-zA-Z0-_-]*.
+- Arguments are comma-separated inside parens.
+- The function returns a string. That string is inserted as text.
+- If the function is not defined, the pre-processor errors.
+- If the function throws/croaks, the pre-processor errors.
+- Return values are NOT escaped. The function is responsible for
+  returning valid text for its context.
+
+Return types:
+
+  Return type    Use case               Example
+  -----------    --------               -------
+  Scalar         Value substitution     %Hostname -> "psycho"
+  NExT fragment   Code generation       %DbSchema("users") -> Column[ ... ]
+  Empty string   Side-effect call       %Log("done") -> ""
+
+Functions can return NExT code. The returned text is substituted
+into the template, then parsed by the NExT parser as usual. This
+makes template engines into code generators — functions build NExT
+trees that get inlined.
+
+Examples:
+
+  # scalar return
+  host( %Hostname )
+  version( %GitVersion )
+  timestamp( %Now )
+
+  # NExT fragment return
+  Database[
+      name("myapp")
+      %DbSchema("users")
+      # returns:
+      # Column[ name("id") type("int") primary(true) ]
+      # Column[ name("email") type("varchar") unique(true) ]
+  ]
+
+  # host function with arguments
+  content( %ReadFile("intro.nxt") )
+  path( %Join("/", ["src" "lib" "core.pm"]) )
+
+  # nested function calls
+  host( %Resolve( %Env("SERVER_HOST") ) )
+
+
+5.1 BUILTINS
+--------------
+
+Builtins are Capitalized. They are always available — no registration
+needed. The engine provides them.
+
+  Builtin              Purpose
+  -------              -------
+  %Include("path")     File inclusion (error if missing)
+  %OptInclude("path")  Optional inclusion (silent if missing)
+  %SearchPath("dir")   Add include search path (additive)
+  %Ignore              Begin ignore block (content stripped)
+  %EndIgnore           End ignore block
+  %Ifdef("VAR")        Conditional: true if VAR set and non-empty
+  %Ifndef("VAR")       Conditional: true if VAR not set or empty
+  %Else                Conditional: alternate branch
+  %Endif               Conditional: close block
+  %Env("NAME")         Explicit ENV lookup (bypasses CLI and hashref)
+  %Var("path")         Explicit hashref lookup (bypasses CLI and ENV)
+
+Builtins with no arguments (like %Hostname in some engines) are
+not part of the core spec. The core builtins are the ones listed
+above. Host-language engines may add their own Capitalized builtins
+for engine-specific features.
+
+
+5.2 HOST-LANGUAGE FUNCTION REGISTRY
+--------------------------------------
+
+The pre-processor does not define host functions. The host language
+registers them before preprocessing. A Perl template engine might
+register:
+
+  my %functions = (
+      'hostname'   => sub { hostname() },
+      'git-version'=> sub { `git describe --tags --always` },
+      'now'        => sub { strftime('%Y-%m-%dT%H:%M:%SZ', gmtime()) },
+      'read-file'  => sub { slurp($_[0]) },
+      'db-schema'  => sub { generate_schema($_[0]) },
+  );
+
+A Python template engine:
+
+  functions = {
+      'hostname':    lambda: socket.gethostname(),
+      'git-version': lambda: subprocess.check_output(
+                          ['git', 'describe', '--tags', '--always']
+                      ).decode().strip(),
+      'now':         lambda: datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+      'read-file':   lambda p: open(p).read(),
+      'db-schema':   lambda t: generate_schema(t),
+  }
+
+The host language decides:
+- Which functions exist.
+- What arguments they accept.
+- What they return (scalar, NExT fragment, empty).
+- What side effects they perform.
+- What security constraints apply.
+
+A Perl engine running in a web app might restrict to safe functions.
+A Python engine in a build pipeline might allow file I/O. The
+template syntax is portable; the function set is not.
+
+
+5.3 FUNCTIONS RETURNING NExT
+-------------------------------
+
+When a function returns NExT code, the returned text is substituted
+as-is into the template. The NExT parser then processes it.
+
+Rules:
+- The function returns raw text, not parsed AST.
+- The returned text must be valid NExT or a valid NExT fragment.
+  If it is not, the parser will error — the pre-processor does
+  not validate NExT structure.
+- The function may return template syntax (% directives) in its
+  output. The pre-processor does NOT re-scan function output for
+  template directives. Functions must return finished NExT.
+- For composition, use %Include to pull in pre-written fragments,
+  or have the host language build NExT through its API.
+
+Example — a function that generates NExT:
+
+  sub generate_schema {
+      my ($table) = @_;
+      my @columns = query_db("DESCRIBE $table");
+      my $next = "";
+      for my $col (@columns) {
+          $next .= "Column[\n";
+          $next .= "    name(\"$col->{name}\")\n";
+          $next .= "    type(\"$col->{type}\")\n";
+          $next .= "    primary(true)\n" if $col->{key};
+          $next .= "]\n";
+      }
+      return $next;
+  }
+
+  # template
+  Database[
+      name("myapp")
+      %DbSchema("users")
+  ]
+
+  # after preprocessing
+  Database[
+      name("myapp")
+      Column[
+          name("id")
+          type("int")
+          primary(true)
+      ]
+      Column[
+          name("email")
+          type("varchar")
+      ]
+  ]
 
 
 6. FILE INCLUSION
 ------------------
 
-Files are inlined at the include point. Syntax: @include "path".
+Files are inlined at the include point.
+
+  %Include("path")      — error if file not found
+  %OptInclude("path")   — silent if file not found (output nothing)
+
+Path resolution (same for both):
+
+  %Include / %OptInclude resolves in this order:
+
+  1. Relative to including file — always checked first.
+     %Include("sub/header.nx") in /app/main.nxt looks for
+     /app/sub/header.nx.
+
+  2. Search path — if the relative path doesn't exist, the engine
+     searches the search path in order. The search path is built
+     from these sources (lowest to highest priority):
+
+       a. Host language default (e.g., "." or application root)
+       b. ENV: NEXTPATH — colon-separated list of directories
+       c. Host config hashref: { include_path => [...] }
+       d. CLI: -I flags (highest priority, added in order)
+       e. Template header: %SearchPath("dir") directives (additive)
+
+  3. Not found — %Include errors. %OptInclude outputs nothing.
+
+  The first file found wins. Search stops at the first match.
+
+Max include depth:
+
+  Includes can nest (an included file can include others). To
+  prevent runaway nesting, the engine enforces a maximum depth.
+
+  Default: 10 levels. Configurable:
+    - Host config hashref: { max_depth => 20 }
+    - CLI: -M 20
+    - 0 = unlimited (no depth check)
+
+  Circular includes (a.nxt → b.nxt → a.nxt) are detected
+  separately and always error, regardless of depth limit.
 
 Rules:
-- The path is relative to the including file's directory.
-- Included content replaces the @include line.
+- Included content replaces the %Include / %OptInclude line.
 - Included content is a valid NExT fragment (not a full document).
-- Includes can be nested (an included file can include others).
-- Circular includes are detected and produce an error.
-- Included files are pre-processed (variables and commands
+- Included files are pre-processed (variables and function calls
   are expanded in included content).
+- %SearchPath is additive — it adds to the search path, never
+  removes. The host language always has the final say.
 
 Examples:
 
   # main.nxt
   Pipeline[
       name("my-pipeline")
-      @include "agents.nx"
-      @include "config.nx"
+      %Include("agents.nx")          # relative: ./agents.nx
+      %Include("config.nx")          # relative: ./config.nx
+      %OptInclude("local.nx")        # optional — no error if missing
+      %OptInclude("staging.nx")      # optional — no error if missing
   ]
 
   # agents.nx (pure NExT, no template syntax)
@@ -135,6 +490,24 @@ Examples:
       name("critic")
       subscribe("git.diff.ready")
   ]
+
+  # Template header — declare search paths
+  # shared/fragments/ contains reusable NExT
+  %SearchPath("includes")
+  %SearchPath("shared/fragments")
+
+  Pipeline[
+      name("my-pipeline")
+      %Include("agents.nx")          # checks ./agents.nx first,
+                                     # then includes/agents.nx,
+                                     # then shared/fragments/agents.nx
+  ]
+
+  # CLI override — nxt-preprocess -I /opt/nxt/fragments ...
+  # Search path: /opt/nxt/fragments (CLI, highest) → includes → .
+
+  # ENV override — NEXTPATH=/opt/shared:/opt/local ...
+  # Search path includes /opt/shared and /opt/local
 
 
 7. CONDITIONALS
@@ -144,37 +517,37 @@ Conditional blocks include or exclude content based on variables.
 
 Syntax:
 
-  #ifdef VARNAME
+  %Ifdef("VARNAME")
   ...content included if VARNAME is set and non-empty...
-  #else
+  %Else
   ...content included if VARNAME is not set or empty...
-  #endif
+  %Endif
 
-  #ifndef VARNAME
+  %Ifndef("VARNAME")
   ...content included if VARNAME is NOT set or empty...
-  #else
-  ...content included if VARNAME is set and non-empty...
-  #endif
+  %Else
+  ...content included if VARNAME is set or empty...
+  %Endif
 
 Rules:
-- #ifdef checks if a variable is set and non-empty.
-- #ifndef is the inverse of #ifdef.
-- #else is optional.
-- #endif is required to close the block.
-- Nesting is allowed (each #ifdef needs its own #endif).
-- Conditionals are evaluated during pre-processing.
+- %Ifdef checks if a variable is set and non-empty.
+- %Ifndef is the inverse of %Ifdef.
+- %Else is optional.
+- %Endif is required to close the block.
+- Nesting is allowed (each %Ifdef needs its own %Endif).
+- Conditionals check all variable sources (CLI, hashref, ENV).
 
 Examples:
 
   # input
   Agent[
       name("debug-agent")
-      #ifdef DEBUG
+      %Ifdef("DEBUG")
       log_level("verbose")
-      #endif
-      #ifndef PRODUCTION
+      %Endif
+      %Ifndef("PRODUCTION")
       metrics("enabled")
-      #endif
+      %Endif
   ]
 
   # with DEBUG=1, PRODUCTION unset
@@ -191,22 +564,88 @@ Examples:
   ]
 
 
+7.1 IGNORE BLOCKS
+-------------------
+
+Ignore blocks strip content entirely. The content between %Ignore
+and %EndIgnore is removed from the output — no text, no directives,
+nothing. This is a C-style /* ... */ block comment for templates.
+
+Syntax:
+
+  %Ignore
+  ...everything here is stripped from output...
+  %EndIgnore
+
+Rules:
+- Content between %Ignore and %EndIgnore is removed completely.
+- Nesting is allowed (each %Ignore needs its own %EndIgnore).
+- Ignore blocks are processed before conditionals and includes.
+- Ignore blocks can contain any template syntax — it's all ignored.
+- Use for: dead code, work-in-progress sections, disabling blocks
+  that contain directives (regular # comments can't do this).
+
+Examples:
+
+  # input
+  Pipeline[
+      name("my-pipeline")
+      %Ignore
+      Agent[
+          name("deprecated-agent")
+          subscribe("old.topic")
+      ]
+      %EndIgnore
+      Agent[
+          name("current-agent")
+          subscribe("new.topic")
+      ]
+  ]
+
+  # output
+  Pipeline[
+      name("my-pipeline")
+      Agent[
+          name("current-agent")
+          subscribe("new.topic")
+      ]
+  ]
+
+  # Disabling a block that contains directives
+  Pipeline[
+      name("my-pipeline")
+      %Ignore
+      %Include("old-config.nx")
+      %Ifdef("LEGACY")
+      old_setting("value")
+      %Endif
+      %EndIgnore
+  ]
+
+
 8. PROCESSING ORDER
 ---------------------
 
 The pre-processor applies transformations in this order:
 
   1. Read the template file.
-  2. Process conditionals (#ifdef / #ifndef / #else / #endif).
+  2. Process %Ignore / %EndIgnore blocks. Content is removed.
+  3. Process conditionals (%Ifdef / %Ifndef / %Else / %Endif).
      Content in false branches is removed.
-  3. Process @include directives. Included files are recursively
-     pre-processed from step 1.
-  4. Expand ${VAR} variables.
-  5. Expand `command` substitutions.
-  6. Output pure NExT.
+  4. Process %Include and %OptInclude directives. Included files
+     are recursively pre-processed from step 1.
+  5. Expand ${VAR} variables, ${path/to/var} paths, and
+     ${VAR1|VAR2:default} fallback chains.
+  6. Expand %function calls (builtins and host functions).
+  7. Output pure NExT.
 
 The output is valid NExT. The parser processes it without
 knowing template syntax existed.
+
+Function output is NOT re-scanned for template directives.
+If a function returns text containing % directives, they are
+treated as literal text by the parser (and likely cause a parse
+error). Functions must return finished NExT.
 
 
 9. ERROR HANDLING
@@ -217,34 +656,82 @@ The pre-processor reports errors with file and line number:
   # unknown variable
   Warning: undefined variable 'FOO' at config.nxt line 5
 
-  # failed command
-  Warning: command 'bad-cmd' failed (exit 1) at config.nxt line 8
+  # undefined function
+  Error: undefined function 'bad-func' at config.nxt line 8
+
+  # function error
+  Error: function 'db-schema' failed: connection refused
+      at config.nxt line 12
 
   # missing include
-  Error: include file not found: 'missing.nx' at config.nxt line 12
+  Error: include file not found: 'missing.nx' at config.nxt line 15
+
+  # include depth exceeded
+  Error: max include depth exceeded (10) at config.nxt line 20
 
   # unclosed conditional
-  Error: unclosed #ifdef at config.nxt line 3
+  Error: unclosed %Ifdef at config.nxt line 3
+
+  # unclosed ignore
+  Error: unclosed %Ignore at config.nxt line 8
 
   # circular include
   Error: circular include detected: 'a.nxt' -> 'b.nxt' -> 'a.nxt'
 
-Warnings (undefined variable, failed command) continue processing.
-Errors (missing include, unclosed conditional) abort.
+  # bad path
+  Error: path 'db/host' not found in config at config.nxt line 7
+
+Warnings (undefined variable) continue processing.
+Errors (undefined function, %Include missing, unclosed conditional,
+unclosed %Ignore, max depth exceeded, bad path) abort.
+%OptInclude on missing file does NOT error — it outputs nothing.
 
 
 10. SECURITY
 --------------
 
-Command substitution runs arbitrary shell commands. The pre-processor
-trusts the template author. Do not pre-process untrusted templates
-without sandboxing.
+Template security is the host language's responsibility. The
+pre-processor does not execute shell commands, eval code, or
+perform I/O beyond file inclusion.
+
+Attack surface:
+
+  Construct        Risk level   Mitigation
+  ---------        ----------   ----------
+  ${VAR}           Low          Variables are controlled by CLI,
+                                hashref, or deployment ENV. Template
+                                authors cannot inject arbitrary env.
+  ${path}          Low          Paths resolve against a hashref
+                                controlled by the host language.
+                                No file system access.
+  %Include         Medium       File paths resolve via relative path
+                                then search path. Path traversal
+                                ("../../etc/passwd") is prevented by
+                                resolving the canonical path and
+                                checking it stays within allowed
+                                roots. The host language should
+                                restrict search paths to trusted
+                                directories.
+  %function        High         The host language defines available
+                                functions. A well-designed engine
+                                exposes only safe functions. Raw shell
+                                execution is NOT available through
+                                template syntax.
+  %Ifdef           Low          Conditionals only check variable
+                                presence. No code execution.
 
 Recommended practice:
-- Use nxt-preprocess only on files you wrote or trust.
-- Pipe through nxt-validate after pre-processing.
-- Never run pre-processed output through eval or system
-  without review.
+- Register only safe functions in the template engine.
+- Validate function arguments (reject unexpected types/shapes).
+- Restrict search paths to trusted directories.
+- Limit %Include paths to allowed directories.
+- Treat templates as code — review them before deployment.
+- For untrusted templates, run in a sandboxed host process.
+
+The key security property: template syntax cannot execute arbitrary
+code. Functions are named, registered callbacks — the host language
+controls the allowlist. A template author cannot call a function
+that was not registered.
 
 
 11. CLI USAGE
@@ -254,40 +741,120 @@ Recommended practice:
 
 Options:
   -D NAME=VALUE    Define a variable (can be repeated).
-  -I dir           Add include search path.
+  -I dir           Add include search path (can be repeated).
+  -M depth         Max include depth (default: 10, 0: unlimited).
   -s               Silent mode (suppress warnings).
   -h               Show help.
+
+CLI definitions (-D) override hashref and ENV. They are the
+highest priority source. CLI include paths (-I) are highest
+priority in the search path.
 
 Examples:
 
   nxt-preprocess -D ENV=production -D PORT=5432 config.nxt > config.nx
   nxt-preprocess -I ./includes main.nxt | nxt-validate schema.nxs
+  nxt-preprocess -M 20 -I ./shared main.nxt > output.nx
 
 
 12. IMPLEMENTATION
 -------------------
 
-The pre-processor is ~200 lines of Perl. Module: Data::NExT::Template.
+The pre-processor is ~250 lines of host-language code.
+
+Perl: Data::NExT::Template
+Python: next_template
 
 Core logic:
 
   sub preprocess {
-      my ($input, %vars) = @_;
-      my $output = $input;
+      my ($input, $config, $functions, $cli_vars, $opts) = @_;
 
-      $output = process_conditionals($output, \%vars);
-      $output = process_includes($output);
-      $output = expand_variables($output, \%vars);
-      $output = expand_commands($output);
+      my $output = $input;
+      $output = process_ignore_blocks($output);
+      $output = process_conditionals($output, $config, $cli_vars);
+      $output = process_includes($output, $config, $cli_vars, $opts);
+      $output = expand_variables($output, $config, $cli_vars);
+      $output = expand_functions($output, $functions);
 
       return $output;
+  }
+
+Include path resolution:
+
+  sub resolve_include {
+      my ($path, $current_dir, $search_path) = @_;
+
+      # 1. Relative to including file (always first)
+      my $candidate = "$current_dir/$path";
+      return $candidate if -f $candidate;
+
+      # 2. Search path (in order: default → ENV → config → CLI → header)
+      for my $dir (@$search_path) {
+          $candidate = "$dir/$path";
+          return $candidate if -f $candidate;
+      }
+
+      # 3. Not found
+      return undef;
+  }
+
+  # Search path is built from (lowest to highest priority):
+  #   - Host default:    ["."] or app root
+  #   - ENV NEXTPATH:    split on : from $ENV{NEXTPATH}
+  #   - Config hashref:  $config->{include_path} (arrayref)
+  #   - CLI -I flags:    $opts->{include_path} (arrayref, added in order)
+  #   - Template header: accumulated from %SearchPath directives
+
+  # Max depth: $opts->{max_depth} // $config->{max_depth} // 10
+  # 0 = unlimited
+
+Variable resolution (single name):
+
+  sub resolve_var {
+      my ($name, $config, $cli_vars) = @_;
+
+      # 1. CLI wins
+      return $cli_vars->{$name} if exists $cli_vars->{$name};
+
+      # 2. Hashref (flat or path)
+      if ($name =~ m{/}) {
+          my @path = split m{/}, $name;
+          my $val = $config;
+          for my $part (@path) {
+              return undef unless ref $val eq 'HASH';
+              $val = $val->{$part};
+          }
+          return $val if defined $val;
+      } else {
+          return $config->{$name} if exists $config->{$name};
+      }
+
+      # 3. ENV (flat only)
+      return $ENV{$name} if defined $ENV{$name};
+
+      # 4. Nothing found
+      return undef;
+  }
+
+Variable resolution (fallback chain):
+
+  sub resolve_fallback {
+      my ($names, $default, $config, $cli_vars) = @_;
+
+      for my $name (@$names) {
+          my $val = resolve_var($name, $config, $cli_vars);
+          return $val if defined $val;
+      }
+
+      return $default;
   }
 
 Each step is a simple text transformation. No parsing of NExT
 structure — just string operations with regex.
 
-Dependencies: Data::NExT (for validate step, optional),
-IPC::Run3 or backticks (for command substitution).
+Dependencies: Data::NExT (for validate step, optional).
+No shell execution dependencies. No IPC modules needed.
 
 
 13. FILE CONVENTIONS
@@ -298,3 +865,84 @@ IPC::Run3 or backticks (for command substitution).
 
 The pre-processor reads .nxt, outputs .nx. The parser only
 sees .nx files.
+
+
+14. DESIGN RATIONALE
+----------------------
+
+Why % prefix instead of @?
+  @ is NExT's symbol namespace. Reusing it for directives creates
+  naming collisions and conceptual confusion. % means "template
+  directive" — a separate namespace, no overlap.
+
+Why ${VAR:default} instead of ${VAR:-default}?
+  The :- syntax is bash convention. NExT is not bash. A single
+  colon is cleaner and equally unambiguous.
+
+Why Capitalized builtins and lowercase host functions?
+  Case as namespace boundary. You can look at any % call and
+  immediately know: Capitalized = engine-provided, lowercase =
+  host-registered. Same pattern as NExT's CamelCase nouns vs
+  snake_case adjectives — conventions that encode meaning in
+  the first character.
+
+Why host-language functions instead of shell commands?
+  Shell commands are an unbounded attack surface. Named functions
+  are a bounded, auditable API. The host language decides what
+  is safe. Templates stay declarative.
+
+Why paths are hashref-only (no ENV)?
+  ENV is flat key-value. Paths imply structure. Mixing them
+  creates naming convention battles (underscores? dots? slashes?).
+  Keeping paths hashref-only is clean: ENV gives flat config,
+  hashref gives structured data.
+
+Why additive search paths (%SearchPath)?
+  Templates should declare their own dependencies without breaking
+  other templates. Additive means: the template adds paths it
+  needs, but never removes paths the host language configured.
+  The host language always has the final say via CLI -I. This
+  makes templates composable — two templates can each add their
+  own search paths without conflict.
+
+Why %OptInclude instead of -shrug flag?
+  A separate builtin is cleaner than an option flag. The parser
+  doesn't need to know about option parsing — %Include and
+  %OptInclude are two distinct directives with different failure
+  modes. Same resolution logic, different error behavior. Named
+  intent is clearer than a flag: "this include is optional" vs
+  "this include might fail, shrug."
+
+Why ${VAR1|VAR2:default} for fallback chains?
+  Deployment configs often have naming variations across environments.
+  HOST vs SERVER_HOST vs NEXTHOST. Fallback chains let the template
+  try multiple names without nesting or host-language logic. The
+  pipe | reads as "or" and is syntactically distinct from paths (/).
+  The template stays declarative.
+
+Why %Ignore blocks?
+  Regular # comments can't disable blocks that contain template
+  directives. %Ignore strips everything — directives, includes,
+  conditionals — all of it. Useful for work-in-progress sections,
+  disabling deprecated config, and template-level dead code. C-style
+  /* ... */ semantics, but with explicit open/close tags.
+
+Why max_depth is configurable?
+  Different use cases have different nesting requirements. A simple
+  config template might need depth 2. A complex build system with
+  deep fragment libraries might need 20. The default (10) covers
+  most cases. Setting 0 = unlimited lets the host language decide
+  when it trusts the include graph.
+
+Why not re-scan function output for template directives?
+  Re-scanning creates hidden complexity — a function could return
+  directives that expand to more directives. This is a macro
+  expansion system, not a template engine. Keeping functions
+  single-pass makes the system predictable: what you see is what
+  you get, modulo the function calls.
+
+Why not let functions return parsed AST?
+  The template engine is a text processor. It does not understand
+  NExT structure. Returning text keeps the abstraction clean —
+  functions produce text, the pre-processor substitutes text, the
+  parser parses NExT. Each layer does one thing.

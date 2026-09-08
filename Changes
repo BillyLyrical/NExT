@@ -1,5 +1,19 @@
 Revision history for NExT
 
+0.3.0 2026-09-08
+    - Add Data::NExT::Template pre-processor
+    - Variable interpolation: ${VAR}, ${a/b/c} paths, ${A|B:default} chains
+    - Host-language function registry (lowercase, registered callbacks)
+    - Builtin functions: %Include, %OptInclude, %SearchPath, %Ifdef,
+      %Ifndef, %Else, %Endif, %Ignore, %EndIgnore, %Env, %Var
+    - File inclusion with search path resolution (CLI -I, ENV NEXTPATH,
+      config hashref, template %SearchPath directives)
+    - Configurable max include depth (-M CLI flag)
+    - %OptInclude for optional includes (silent on missing)
+    - %Ignore / %EndIgnore for block stripping (nested aware)
+    - CLI -> hashref -> ENV -> default variable resolution order
+    - Security: no shell execution, host-language controlled functions
+
 0.2.0 2026-09-08
     - Add anonymous lists: bare [ ] syntax for flat value collections
     - Lists are atomic, homogeneous, non-nesting
