@@ -45,7 +45,10 @@ sub _peek {
     }
     return 'ADJ' if $ch ge 'a' && $ch le 'z' || $ch eq '_' || $ch eq '-';
     return 'SYMBOL' if $ch eq '@';
-    return 'STRING' if $ch eq '"';
+    if ($ch eq '"') {
+        return 'HEREDOC' if substr($self->{input}, $self->{pos}, 3) eq '"""';
+        return 'STRING';
+    }
     return 'NUM' if $ch ge '0' && $ch le '9';
     $ERROR = "line $self->{line}: unexpected character '$ch'";
     return 'ERR';
@@ -123,6 +126,25 @@ sub _read_string {
     return undef;
 }
 
+sub _read_heredoc {
+    my ($self) = @_;
+    my $line = $self->{line};
+    $self->{pos} += 3; # skip opening """
+    my $str = '';
+    while ($self->{pos} < length($self->{input})) {
+        my $c = $self->_ch;
+        if ($c eq '"' && substr($self->{input}, $self->{pos}, 3) eq '"""') {
+            $self->{pos} += 3;
+            return $str;
+        }
+        $self->{line}++ if $c eq "\n";
+        $str .= $c;
+        $self->{pos}++;
+    }
+    $ERROR = "line $line: unterminated heredoc";
+    return undef;
+}
+
 sub _read_num {
     my ($self) = @_;
     my $line = $self->{line};
@@ -165,6 +187,10 @@ sub _parse_value {
     my $tok = $self->_peek;
     if ($tok eq 'STRING') {
         my $v = $self->_read_string;
+        return defined $v ? { type => 'string', value => $v, line => $self->{line} } : undef;
+    }
+    if ($tok eq 'HEREDOC') {
+        my $v = $self->_read_heredoc;
         return defined $v ? { type => 'string', value => $v, line => $self->{line} } : undef;
     }
     if ($tok eq 'NUM') {

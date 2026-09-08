@@ -455,4 +455,46 @@ EOF
     is(scalar @{$tree->[1]{children}[1]{value}{items}}, 1);
 }
 
+# --- Heredoc (triple-quoted) strings ---
+
+{
+    my $input = 'X[ desc("""Hello world""") ]';
+    my $tree = Data::NExT::parse($input);
+    is($tree->[0]{children}[0]{value}{type}, 'string', 'heredoc: type is string');
+    is($tree->[0]{children}[0]{value}{value}, 'Hello world', 'heredoc: value correct');
+}
+
+{
+    my $input = qq{X[ desc("""\nLine 1\nLine 2\nLine 3\n""") ]};
+    my $tree = Data::NExT::parse($input);
+    my $val = $tree->[0]{children}[0]{value}{value};
+    like($val, qr/Line 1/, 'heredoc: multi-line contains Line 1');
+    like($val, qr/Line 2/, 'heredoc: multi-line contains Line 2');
+    like($val, qr/Line 3/, 'heredoc: multi-line contains Line 3');
+    is($val, "\nLine 1\nLine 2\nLine 3\n", 'heredoc: exact content preserved');
+}
+
+{
+    my $input = q{X[ desc("""Contains "quotes" inside""") ]};
+    my $tree = Data::NExT::parse($input);
+    is($tree->[0]{children}[0]{value}{value}, 'Contains "quotes" inside', 'heredoc: embedded quotes OK');
+}
+
+{
+    my $input = qq{X[ a("normal") b("""multi\nline""") c(42) ]};
+    my $tree = Data::NExT::parse($input);
+    is(scalar @{$tree->[0]{children}}, 3, 'heredoc: mixed with other values');
+    is($tree->[0]{children}[0]{value}{value}, 'normal', 'heredoc: regular string OK');
+    like($tree->[0]{children}[1]{value}{value}, qr/multi\nline/, 'heredoc: multi-line OK');
+    is($tree->[0]{children}[2]{value}{value}, 42, 'heredoc: integer OK');
+}
+
+{
+    $Data::NExT::ERROR = undef;
+    my $input = 'X[ desc("""unterminated )';
+    my $tree = Data::NExT::parse($input);
+    ok(defined $Data::NExT::ERROR, 'heredoc: unterminated sets ERROR');
+    like($Data::NExT::ERROR, qr/unterminated heredoc/, 'heredoc: error message correct');
+}
+
 done_testing();
