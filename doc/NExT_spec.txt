@@ -150,11 +150,11 @@ needed inside. The opening """ must be followed by a newline, and
 the closing """ must be on its own line (possibly indented). This
 enforces visual clarity — heredocs always appear as a distinct block:
 
-  description("""
-  Line 1
-  Line 2
-  Line 3
-  """)
+    description("""
+Line 1
+Line 2
+Line 3
+    """)
 
 Inline heredocs ("""text""") are not permitted.
 Integers are non-negative (no leading zeros except for "0").
