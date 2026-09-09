@@ -186,6 +186,16 @@ sub _read_num {
     return { type => 'integer', value => $raw + 0, line => $line };
 }
 
+sub _read_num_value {
+    my ($self) = @_;
+    pos($self->{input}) = $self->{pos};
+    $self->{input} =~ $RE_NUM;
+    my $len = $+[0] - $self->{pos};
+    my $raw = substr($self->{input}, $self->{pos}, $len);
+    $self->{pos} += $len;
+    return $raw + 0;
+}
+
 sub _read_symbol {
     my ($self) = @_;
     my $line = $self->{line};
@@ -195,6 +205,16 @@ sub _read_symbol {
     my $name = $1;
     $self->{pos} = $end;
     return { type => 'symbol', value => '@' . $name, line => $line };
+}
+
+sub _read_symbol_value {
+    my ($self) = @_;
+    pos($self->{input}) = $self->{pos};
+    $self->{input} =~ $RE_SYM;
+    my $end = $+[0];
+    my $name = $1;
+    $self->{pos} = $end;
+    return '@' . $name;
 }
 
 sub _expect {
@@ -214,25 +234,25 @@ sub _parse_value {
     my $tok = $self->_peek;
     if ($tok eq 'STRING') {
         my $v = $self->_read_string;
-        return defined $v ? { type => 'string', value => $v, line => $self->{line} } : undef;
+        return defined $v ? $v : undef;
     }
     if ($tok eq 'HEREDOC') {
         my $v = $self->_read_heredoc;
-        return defined $v ? { type => 'string', value => $v, line => $self->{line} } : undef;
+        return defined $v ? $v : undef;
     }
     if ($tok eq 'NUM') {
-        return $self->_read_num;
+        return $self->_read_num_value;
     }
     if ($tok eq 'BOOL_T') {
         $self->{pos} += 4;
-        return { type => 'boolean', value => 1, line => $self->{line} };
+        return 1;
     }
     if ($tok eq 'BOOL_F') {
         $self->{pos} += 5;
-        return { type => 'boolean', value => 0, line => $self->{line} };
+        return 0;
     }
     if ($tok eq 'SYMBOL') {
-        return $self->_read_symbol;
+        return $self->_read_symbol_value;
     }
     if ($tok eq 'NOUN') {
         return $self->_parse_object;
@@ -253,7 +273,6 @@ sub _parse_value {
 
 sub _parse_list {
     my ($self) = @_;
-    my $line = $self->{line};
     $self->{pos}++; # skip [
     my @items;
     while (1) {
@@ -265,28 +284,29 @@ sub _parse_list {
         push @items, $val;
     }
     return undef unless $self->_expect(']');
-    return { type => 'list', items => \@items, line => $line };
+    return \@items;
 }
 
 sub _parse_object {
     my ($self) = @_;
     my $noun = $self->_read_noun;
     return undef unless $self->_expect('[');
-    my @children;
+    my %content;
     while (1) {
         my $tok = $self->_peek;
         last if $tok eq ']' || $tok eq 'EOF';
         if ($tok eq 'NOUN') {
             my $child = $self->_parse_object;
             return undef unless defined $child;
-            push @children, $child;
+            my ($child_key) = keys %$child;
+            $content{$child_key} = $child->{$child_key};
         } elsif ($tok eq 'ADJ') {
             my $adj = $self->_read_adj;
             unless ($self->_expect('(')) { return undef; }
             my $val = $self->_parse_value;
             return undef unless defined $val;
             unless ($self->_expect(')')) { return undef; }
-            push @children, { type => 'adj', name => $adj->{name}, value => $val, line => $adj->{line} };
+            $content{$adj->{name}} = $val;
         } elsif ($tok eq '#') {
             $self->_skip_ws;
         } else {
@@ -295,7 +315,7 @@ sub _parse_object {
         }
     }
     return undef unless $self->_expect(']');
-    return { type => 'noun', name => $noun->{name}, children => \@children, line => $noun->{line} };
+    return { $noun->{name} => \%content };
 }
 
 sub parse {
@@ -372,25 +392,26 @@ first character:
 Parses a NExT string and returns a reference to an array of top-level
 noun nodes. Returns C<undef> on error and sets C<$Data::NExT::ERROR>.
 
-Each node is a hash reference:
+Each noun becomes a hash reference with the noun name as key:
 
     {
-        type     => 'noun',            # or 'adj'
-        name     => 'Window',          # noun name or adjective name
-        children => [...],             # array of child nodes (nouns only)
-        value    => {...},             # value node (adjectives only)
-        line     => 1,                 # source line number
+        Window => {
+            title => 'Settings',
+            width => 500,
+            Box => {
+                orientation => 'vertical',
+            }
+        }
     }
 
-Value nodes for adjectives:
-
-    { type => 'string',  value => 'hello', line => 2 }
-    { type => 'integer', value => 42,      line => 3 }
-    { type => 'float',   value => 3.14,    line => 4 }
-    { type => 'boolean', value => 1,       line => 5 }  # 1=true, 0=false
-    { type => 'symbol',  value => '@foo',  line => 6 }
-    { type => 'noun',    name => 'Var', children => [...], line => 7 }
-    { type => 'list',    items => [...],  line => 8 }
+Values use Perl native types:
+    - Strings: 'hello'
+    - Integers: 42
+    - Floats: 3.14
+    - Booleans: 1 (true) or 0 (false)
+    - Symbols: '@foo'
+    - Lists: ['a', 'b', 'c']
+    - Nested nouns: { Var => { bind => 'x' } }
 
 =head1 AUTHOR
 

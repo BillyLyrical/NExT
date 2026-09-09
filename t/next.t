@@ -23,9 +23,9 @@ use Data::NExT;
 {
     my $tree = Data::NExT::parse('Window[ ]');
     is(scalar @$tree, 1, 'empty noun: one block');
-    is($tree->[0]{type}, 'noun');
-    is($tree->[0]{name}, 'Window');
-    is(scalar @{$tree->[0]{children}}, 0, 'empty noun: no children');
+    ok(exists $tree->[0]{Window}, 'empty noun: has Window key');
+    is(ref $tree->[0]{Window}, 'HASH', 'empty noun: Window is hashref');
+    is(scalar keys %{$tree->[0]{Window}}, 0, 'empty noun: no children');
 }
 
 # --- Noun with one adjective ---
@@ -33,63 +33,43 @@ use Data::NExT;
 {
     my $tree = Data::NExT::parse('Agent[ name("critic") ]');
     is(scalar @$tree, 1);
-    my $agent = $tree->[0];
-    is($agent->{name}, 'Agent');
-    is(scalar @{$agent->{children}}, 1);
-    is($agent->{children}[0]{type}, 'adj');
-    is($agent->{children}[0]{name}, 'name');
-    is($agent->{children}[0]{value}{type}, 'string');
-    is($agent->{children}[0]{value}{value}, 'critic');
+    my $agent = $tree->[0]{Agent};
+    is($agent->{name}, 'critic');
 }
 
 # --- Value types ---
 
 {
-    my $tree = Data::NExT::parse('X[ i(42) f(3.14) s("hello") t(true) f(false) sym(@cancel) ]');
-    my @adj = @{$tree->[0]{children}};
-    is(scalar @adj, 6, 'all value types: six adjectives');
+    my $tree = Data::NExT::parse('X[ i(42) f(3.14) s("hello") t(true) fs(false) sym(@cancel) ]');
+    my $x = $tree->[0]{X};
+    is(scalar keys %$x, 6, 'all value types: six adjectives');
 
-    is($adj[0]{value}{type}, 'integer');
-    is($adj[0]{value}{value}, 42);
-
-    is($adj[1]{value}{type}, 'float');
-    is($adj[1]{value}{value}, 3.14);
-
-    is($adj[2]{value}{type}, 'string');
-    is($adj[2]{value}{value}, 'hello');
-
-    is($adj[3]{value}{type}, 'boolean');
-    is($adj[3]{value}{value}, 1);
-
-    is($adj[4]{value}{type}, 'boolean');
-    is($adj[4]{value}{value}, 0);
-
-    is($adj[5]{value}{type}, 'symbol');
-    is($adj[5]{value}{value}, '@cancel');
+    is($x->{i}, 42);
+    is($x->{f}, 3.14);
+    is($x->{s}, 'hello');
+    is($x->{t}, 1);
+    is($x->{fs}, 0);
+    is($x->{sym}, '@cancel');
 }
 
 # --- String escapes ---
 
 {
     my $tree = Data::NExT::parse('X[ s("line1\\nline2") t("tab\\there") q("say \\"hi\\"") b("back\\\\slash") ]');
-    my @adj = @{$tree->[0]{children}};
-    is($adj[0]{value}{value}, "line1\nline2", 'string escape \\n');
-    is($adj[1]{value}{value}, "tab\there", 'string escape \\t');
-    is($adj[2]{value}{value}, 'say "hi"', 'string escape \\"');
-    is($adj[3]{value}{value}, 'back\\slash', 'string escape \\\\');
+    my $x = $tree->[0]{X};
+    is($x->{s}, "line1\nline2", 'string escape \\n');
+    is($x->{t}, "tab\there", 'string escape \\t');
+    is($x->{q}, 'say "hi"', 'string escape \\"');
+    is($x->{b}, 'back\\slash', 'string escape \\\\');
 }
 
 # --- Nested nouns ---
 
 {
     my $tree = Data::NExT::parse('Outer[ Inner[ val("x") ] ]');
-    my $outer = $tree->[0];
-    is($outer->{name}, 'Outer');
-    is(scalar @{$outer->{children}}, 1);
-    my $inner = $outer->{children}[0];
-    is($inner->{type}, 'noun');
-    is($inner->{name}, 'Inner');
-    is($inner->{children}[0]{value}{value}, 'x');
+    my $outer = $tree->[0]{Outer};
+    is(ref $outer->{Inner}, 'HASH', 'nested noun is hashref');
+    is($outer->{Inner}{val}, 'x');
 }
 
 # --- Multiple siblings ---
@@ -97,21 +77,19 @@ use Data::NExT;
 {
     my $tree = Data::NExT::parse('A[ ] B[ ] C[ ]');
     is(scalar @$tree, 3, 'three top-level siblings');
-    is($tree->[0]{name}, 'A');
-    is($tree->[1]{name}, 'B');
-    is($tree->[2]{name}, 'C');
+    ok(exists $tree->[0]{A}, 'first sibling is A');
+    ok(exists $tree->[1]{B}, 'second sibling is B');
+    ok(exists $tree->[2]{C}, 'third sibling is C');
 }
 
 # --- Mixed adj/noun order inside a noun ---
 
 {
     my $tree = Data::NExT::parse('Box[ Child[ ] label("test") ]');
-    my $box = $tree->[0];
-    is(scalar @{$box->{children}}, 2);
-    is($box->{children}[0]{type}, 'noun');
-    is($box->{children}[0]{name}, 'Child');
-    is($box->{children}[1]{type}, 'adj');
-    is($box->{children}[1]{name}, 'label');
+    my $box = $tree->[0]{Box};
+    is(scalar keys %$box, 2);
+    ok(exists $box->{Child}, 'noun child exists');
+    is($box->{label}, 'test');
 }
 
 # --- Comments (block + inline) ---
@@ -123,15 +101,14 @@ X[ name("a") ] # inline comment
 EOF
     my $tree = Data::NExT::parse($input);
     is(scalar @$tree, 1, 'comments ignored');
-    is($tree->[0]{name}, 'X');
+    ok(exists $tree->[0]{X}, 'X noun exists');
 }
 
 # --- Adjective with hyphen in name ---
 
 {
     my $tree = Data::NExT::parse('X[ max-length(100) ]');
-    is($tree->[0]{children}[0]{name}, 'max-length');
-    is($tree->[0]{children}[0]{value}{value}, 100);
+    is($tree->[0]{X}{'max-length'}, 100);
 }
 
 # --- Deep nesting ---
@@ -139,22 +116,16 @@ EOF
 {
     my $input = 'A[ B[ C[ D[ val("deep") ] ] ] ]';
     my $tree = Data::NExT::parse($input);
-    is($tree->[0]{name}, 'A');
-    is($tree->[0]{children}[0]{name}, 'B');
-    is($tree->[0]{children}[0]{children}[0]{name}, 'C');
-    is($tree->[0]{children}[0]{children}[0]{children}[0]{name}, 'D');
-    is($tree->[0]{children}[0]{children}[0]{children}[0]{children}[0]{value}{value}, 'deep');
+    is($tree->[0]{A}{B}{C}{D}{val}, 'deep');
 }
 
 # --- Object as value (inline noun) ---
 
 {
     my $tree = Data::NExT::parse('X[ child( Var[ bind("x") ] ) ]');
-    my $adj = $tree->[0]{children}[0];
-    is($adj->{type}, 'adj');
-    is($adj->{value}{type}, 'noun');
-    is($adj->{value}{name}, 'Var');
-    is($adj->{value}{children}[0]{value}{value}, 'x');
+    my $x = $tree->[0]{X};
+    is(ref $x->{child}, 'HASH', 'inline noun is hashref');
+    is($x->{child}{Var}{bind}, 'x');
 }
 
 # --- Full pipeline example from spec ---
@@ -174,10 +145,12 @@ Agent[
 EOF
     my $tree = Data::NExT::parse($input);
     is(scalar @$tree, 2, 'pipeline example: two top-level nouns');
-    is($tree->[0]{name}, 'Pipeline');
-    is($tree->[1]{name}, 'Agent');
-    is(scalar @{$tree->[0]{children}}, 2);
-    is(scalar @{$tree->[1]{children}}, 4);
+    is($tree->[0]{Pipeline}{name}, 'code-review');
+    is($tree->[0]{Pipeline}{about}, 'Multi-agent code review');
+    is($tree->[1]{Agent}{name}, 'critic');
+    is($tree->[1]{Agent}{wit}, 'logic');
+    is($tree->[1]{Agent}{subscribe}, 'git-context.output');
+    is($tree->[1]{Agent}{publish}, 'critic.output');
 }
 
 # --- GUI example from spec ---
@@ -197,13 +170,14 @@ Window[
 EOF
     my $tree = Data::NExT::parse($input);
     is(scalar @$tree, 1);
-    my $win = $tree->[0];
-    is($win->{name}, 'Window');
-    is(scalar @{$win->{children}}, 4);
-    my $box = $win->{children}[3];
-    is($box->{type}, 'noun');
-    is($box->{name}, 'Box');
-    is(scalar @{$box->{children}}, 3);
+    my $win = $tree->[0]{Window};
+    is($win->{title}, 'Settings');
+    is($win->{width}, 500);
+    is($win->{height}, 400);
+    is($win->{Box}{orientation}, 'vertical');
+    is($win->{Box}{Label}{text}, 'Username');
+    is($win->{Box}{Button}{text}, 'Save');
+    is($win->{Box}{Button}{onclick}, 'save');
 }
 
 # --- Config example from spec ---
@@ -222,36 +196,35 @@ Database[
 ]
 EOF
     my $tree = Data::NExT::parse($input);
-    is($tree->[0]{name}, 'Database');
-    is(scalar @{$tree->[0]{children}}, 4);
-    my $pool = $tree->[0]{children}[3];
-    is($pool->{name}, 'Pool');
-    is(scalar @{$pool->{children}}, 3);
-    is($pool->{children}[0]{value}{value}, 5);
-    is($pool->{children}[1]{value}{value}, 20);
-    is($pool->{children}[2]{value}{value}, 30);
+    my $db = $tree->[0]{Database};
+    is($db->{host}, 'localhost');
+    is($db->{port}, 5432);
+    is($db->{name}, 'myapp');
+    is($db->{Pool}{min}, 5);
+    is($db->{Pool}{max}, 20);
+    is($db->{Pool}{timeout}, 30);
 }
 
 # --- Zero value ---
 
 {
     my $tree = Data::NExT::parse('X[ val(0) ]');
-    is($tree->[0]{children}[0]{value}{value}, 0);
+    is($tree->[0]{X}{val}, 0);
 }
 
 # --- Large integer ---
 
 {
     my $tree = Data::NExT::parse('X[ val(1000000) ]');
-    is($tree->[0]{children}[0]{value}{value}, 1000000);
+    is($tree->[0]{X}{val}, 1000000);
 }
 
 # --- Float without leading digit ---
 
 {
     my $tree = Data::NExT::parse('X[ val(0.5) ]');
-    is($tree->[0]{children}[0]{value}{type}, 'float');
-    is($tree->[0]{children}[0]{value}{value}, 0.5);
+    is($tree->[0]{X}{val}, 0.5);
+    ok(!($tree->[0]{X}{val} =~ /\./ && int($tree->[0]{X}{val}) == $tree->[0]{X}{val}), '0.5 is float, not integer');
 }
 
 # --- Unterminated string error ---
@@ -304,20 +277,6 @@ EOF
     ok(defined $Data::NExT::ERROR, 'starts-with-digit noun is error');
 }
 
-# --- Line tracking ---
-
-{
-    my $input = <<'EOF';
-X[
-    name("a")
-    val(42)
-]
-EOF
-    my $tree = Data::NExT::parse($input);
-    is($tree->[0]{line}, 1, 'noun line = 1');
-    is($tree->[0]{children}[0]{line}, 2, 'adj line = 2');
-}
-
 # --- Multiple top-level blocks with comments between ---
 
 {
@@ -328,117 +287,109 @@ B[ x("1") ]
 EOF
     my $tree = Data::NExT::parse($input);
     is(scalar @$tree, 2);
-    is($tree->[0]{name}, 'A');
-    is($tree->[1]{name}, 'B');
+    ok(exists $tree->[0]{A}, 'first block is A');
+    is($tree->[1]{B}{x}, '1');
 }
 
 # --- Boolean that is a prefix of a longer word is not a boolean ---
 
 {
     my $tree = Data::NExT::parse('X[ truthy("val") ]');
-    is($tree->[0]{children}[0]{name}, 'truthy');
-    is($tree->[0]{children}[0]{value}{type}, 'string');
+    is($tree->[0]{X}{truthy}, 'val');
 }
 
 # --- Adjacent nouns at same level ---
 
 {
     my $tree = Data::NExT::parse('Outer[ A[ ] B[ ] ]');
-    my $outer = $tree->[0];
-    is(scalar @{$outer->{children}}, 2);
-    is($outer->{children}[0]{name}, 'A');
-    is($outer->{children}[1]{name}, 'B');
+    my $outer = $tree->[0]{Outer};
+    is(scalar keys %$outer, 2);
+    ok(exists $outer->{A}, 'first child is A');
+    ok(exists $outer->{B}, 'second child is B');
 }
 
 # --- Empty list ---
 
 {
     my $tree = Data::NExT::parse('X[ items([]) ]');
-    my $adj = $tree->[0]{children}[0];
-    is($adj->{type}, 'adj');
-    is($adj->{name}, 'items');
-    is($adj->{value}{type}, 'list');
-    is(scalar @{$adj->{value}{items}}, 0, 'empty list: zero items');
+    my $x = $tree->[0]{X};
+    is(ref $x->{items}, 'ARRAY', 'empty list is arrayref');
+    is(scalar @{$x->{items}}, 0, 'empty list: zero items');
 }
 
 # --- List of strings ---
 
 {
     my $tree = Data::NExT::parse('X[ tags(["gui" "settings" "dialog"]) ]');
-    my $list = $tree->[0]{children}[0]{value};
-    is($list->{type}, 'list');
-    is(scalar @{$list->{items}}, 3, 'string list: three items');
-    is($list->{items}[0]{type}, 'string');
-    is($list->{items}[0]{value}, 'gui');
-    is($list->{items}[1]{value}, 'settings');
-    is($list->{items}[2]{value}, 'dialog');
+    my $list = $tree->[0]{X}{tags};
+    is(ref $list, 'ARRAY', 'list is arrayref');
+    is(scalar @$list, 3, 'string list: three items');
+    is($list->[0], 'gui');
+    is($list->[1], 'settings');
+    is($list->[2], 'dialog');
 }
 
 # --- List of integers ---
 
 {
     my $tree = Data::NExT::parse('X[ nums([1 2 3]) ]');
-    my $list = $tree->[0]{children}[0]{value};
-    is($list->{type}, 'list');
-    is(scalar @{$list->{items}}, 3, 'int list: three items');
-    is($list->{items}[0]{type}, 'integer');
-    is($list->{items}[0]{value}, 1);
-    is($list->{items}[1]{value}, 2);
-    is($list->{items}[2]{value}, 3);
+    my $list = $tree->[0]{X}{nums};
+    is(ref $list, 'ARRAY', 'list is arrayref');
+    is(scalar @$list, 3, 'int list: three items');
+    is($list->[0], 1);
+    is($list->[1], 2);
+    is($list->[2], 3);
 }
 
 # --- List of floats ---
 
 {
     my $tree = Data::NExT::parse('X[ coords([1.0 2.5 3.3]) ]');
-    my $list = $tree->[0]{children}[0]{value};
-    is(scalar @{$list->{items}}, 3);
-    is($list->{items}[0]{type}, 'float');
-    is($list->{items}[0]{value}, 1.0);
-    is($list->{items}[2]{value}, 3.3);
+    my $list = $tree->[0]{X}{coords};
+    is(scalar @$list, 3);
+    is($list->[0], 1.0);
+    is($list->[2], 3.3);
 }
 
 # --- List of booleans ---
 
 {
     my $tree = Data::NExT::parse('X[ flags([true false true]) ]');
-    my $list = $tree->[0]{children}[0]{value};
-    is(scalar @{$list->{items}}, 3);
-    is($list->{items}[0]{type}, 'boolean');
-    is($list->{items}[0]{value}, 1);
-    is($list->{items}[1]{value}, 0);
+    my $list = $tree->[0]{X}{flags};
+    is(scalar @$list, 3);
+    is($list->[0], 1);
+    is($list->[1], 0);
+    is($list->[2], 1);
 }
 
 # --- List of symbols ---
 
 {
     my $tree = Data::NExT::parse('X[ syms([@a @b @c]) ]');
-    my $list = $tree->[0]{children}[0]{value};
-    is(scalar @{$list->{items}}, 3);
-    is($list->{items}[0]{type}, 'symbol');
-    is($list->{items}[0]{value}, '@a');
-    is($list->{items}[2]{value}, '@c');
+    my $list = $tree->[0]{X}{syms};
+    is(scalar @$list, 3);
+    is($list->[0], '@a');
+    is($list->[2], '@c');
 }
 
 # --- List with comments between items ---
 
 {
     my $tree = Data::NExT::parse("X[ items([ # first\n\"a\" # second\n\"b\" ]) ]");
-    my $list = $tree->[0]{children}[0]{value};
-    is(scalar @{$list->{items}}, 2, 'list with comments: two items');
-    is($list->{items}[0]{value}, 'a');
-    is($list->{items}[1]{value}, 'b');
+    my $list = $tree->[0]{X}{items};
+    is(scalar @$list, 2, 'list with comments: two items');
+    is($list->[0], 'a');
+    is($list->[1], 'b');
 }
 
 # --- List inside nested noun ---
 
 {
     my $tree = Data::NExT::parse('Outer[ Inner[ tags(["a" "b"]) ] ]');
-    my $inner = $tree->[0]{children}[0];
-    is($inner->{name}, 'Inner');
-    my $list = $inner->{children}[0]{value};
-    is($list->{type}, 'list');
-    is(scalar @{$list->{items}}, 2);
+    my $inner = $tree->[0]{Outer}{Inner};
+    my $list = $inner->{tags};
+    is(ref $list, 'ARRAY', 'list is arrayref');
+    is(scalar @$list, 2);
 }
 
 # --- Mixed nouns and lists at top level ---
@@ -450,9 +401,8 @@ Item[ name("b") tags(["z"]) ]
 EOF
     my $tree = Data::NExT::parse($input);
     is(scalar @$tree, 2, 'two items with lists');
-    is($tree->[0]{children}[1]{value}{type}, 'list');
-    is(scalar @{$tree->[0]{children}[1]{value}{items}}, 2);
-    is(scalar @{$tree->[1]{children}[1]{value}{items}}, 1);
+    is(scalar @{$tree->[0]{Item}{tags}}, 2);
+    is(scalar @{$tree->[1]{Item}{tags}}, 1);
 }
 
 # --- Heredoc (triple-quoted) strings ---
@@ -460,14 +410,13 @@ EOF
 {
     my $input = "X[ desc(\"\"\"\nHello world\n\"\"\") ]";
     my $tree = Data::NExT::parse($input);
-    is($tree->[0]{children}[0]{value}{type}, 'string', 'heredoc: type is string');
-    is($tree->[0]{children}[0]{value}{value}, "Hello world\n", 'heredoc: value correct');
+    is($tree->[0]{X}{desc}, "Hello world\n", 'heredoc: value correct');
 }
 
 {
     my $input = "X[ desc(\"\"\"\nLine 1\nLine 2\nLine 3\n\"\"\") ]";
     my $tree = Data::NExT::parse($input);
-    my $val = $tree->[0]{children}[0]{value}{value};
+    my $val = $tree->[0]{X}{desc};
     like($val, qr/Line 1/, 'heredoc: multi-line contains Line 1');
     like($val, qr/Line 2/, 'heredoc: multi-line contains Line 2');
     like($val, qr/Line 3/, 'heredoc: multi-line contains Line 3');
@@ -477,16 +426,17 @@ EOF
 {
     my $input = "X[ desc(\"\"\"\nContains \"quotes\" inside\n\"\"\") ]";
     my $tree = Data::NExT::parse($input);
-    is($tree->[0]{children}[0]{value}{value}, "Contains \"quotes\" inside\n", 'heredoc: embedded quotes OK');
+    is($tree->[0]{X}{desc}, "Contains \"quotes\" inside\n", 'heredoc: embedded quotes OK');
 }
 
 {
     my $input = "X[ a(\"normal\") b(\"\"\"\nmulti\nline\n\"\"\") c(42) ]";
     my $tree = Data::NExT::parse($input);
-    is(scalar @{$tree->[0]{children}}, 3, 'heredoc: mixed with other values');
-    is($tree->[0]{children}[0]{value}{value}, 'normal', 'heredoc: regular string OK');
-    like($tree->[0]{children}[1]{value}{value}, qr/multi\nline/, 'heredoc: multi-line OK');
-    is($tree->[0]{children}[2]{value}{value}, 42, 'heredoc: integer OK');
+    my $x = $tree->[0]{X};
+    is(scalar keys %$x, 3, 'heredoc: mixed with other values');
+    is($x->{a}, 'normal', 'heredoc: regular string OK');
+    like($x->{b}, qr/multi\nline/, 'heredoc: multi-line OK');
+    is($x->{c}, 42, 'heredoc: integer OK');
 }
 
 {

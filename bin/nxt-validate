@@ -77,10 +77,14 @@ if ($opts{verbose}) {
     my $count = scalar @$tree;
     print "OK: $file ($count top-level noun" . ($count == 1 ? '' : 's') . ")\n";
     for my $node (@$tree) {
-        next unless $node->{type} eq 'noun';
-        my @adjs = grep { $_->{type} eq 'adj' } @{$node->{children} // []};
-        my @nouns = grep { $_->{type} eq 'noun' } @{$node->{children} // []};
-        printf "  %s [%d adj, %d children]\n", $node->{name}, scalar @adjs, scalar @nouns;
+        for my $key (keys %$node) {
+            if (ref $node->{$key} eq 'HASH') {
+                my $content = $node->{$key};
+                my @adjs = grep { ref $content->{$_} ne 'HASH' } keys %$content;
+                my @nouns = grep { ref $content->{$_} eq 'HASH' } keys %$content;
+                printf "  %s [%d adj, %d children]\n", $key, scalar @adjs, scalar @nouns;
+            }
+        }
     }
 }
 

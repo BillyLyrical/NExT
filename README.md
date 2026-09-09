@@ -21,8 +21,24 @@ Window[
 my $tree = Data::NExT::parse($input);
 die "Error: $Data::NExT::ERROR\n" if defined $Data::NExT::ERROR;
 
+# Output is a hashref matching JSON/TOML::Tiny structure:
+# [
+#   {
+#     Window => {
+#       title => 'Settings',
+#       width => 500,
+#       Box => {
+#         orientation => 'vertical',
+#         Label => { text => 'Hello' }
+#       }
+#     }
+#   }
+# ]
+
 for my $node (@$tree) {
-    print "$node->{name}\n" if $node->{type} eq 'noun';
+    for my $key (keys %$node) {
+        print "$key\n" if ref $node->{$key} eq 'HASH';
+    }
 }
 ```
 
@@ -31,6 +47,11 @@ for my $node (@$tree) {
 NExT is a declarative, hierarchical data format designed for LL(1)
 single-pass parsing. Purely declarative with no code, no logic, and
 no Turing-complete expressions.
+
+The parser produces hashrefs matching JSON/TOML::Tiny output format:
+- Nouns become hashref keys
+- Adjectives become key-value pairs
+- Values use Perl native types (strings, numbers, booleans, arrayrefs)
 
 ```
 Token class   Bracket   Example
