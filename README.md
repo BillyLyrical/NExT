@@ -47,8 +47,7 @@ Comment       (none)    # this is a comment
 Type      Syntax                    Example
 ------    ------                    -------
 String    "double-quoted"           "Hello"
-Heredoc   """triple-quoted"""       """multi-line
-                                     text"""
+Heredoc   """ (block format)        """\nmulti-line\ntext"""
 Integer   decimal digits            42, 0, 1000
 Float     digits.digits             3.14, 0.5
 Boolean   true or false             true, false

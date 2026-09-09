@@ -139,7 +139,7 @@ sub to_text {
     }
 
     if ($node->{type} eq 'adj') {
-        my $val = _value_to_text($node->{value});
+        my $val = _value_to_text($node->{value}, $indent);
         my $name = $node->{name};
         return "${pad}${name}(${val})\n";
     }
@@ -148,20 +148,30 @@ sub to_text {
 }
 
 sub _value_to_text {
-    my ($val) = @_;
+    my ($val, $indent) = @_;
+    $indent //= 0;
     return '""' unless ref $val eq 'HASH';
+    my $pad = '    ' x $indent;
 
-    if ($val->{type} eq 'string')  { return '"' . _escape($val->{value}) . '"'; }
+    if ($val->{type} eq 'string') {
+        if ($val->{value} =~ /\n/) {
+            # Multi-line: use heredoc block format
+            my $content = $val->{value};
+            $content .= "\n" unless $content =~ /\n$/;
+            return '"""' . "\n" . $content . $pad . '"""';
+        }
+        return '"' . _escape($val->{value}) . '"';
+    }
     if ($val->{type} eq 'integer') { return "$val->{value}"; }
     if ($val->{type} eq 'float')   { return "$val->{value}"; }
     if ($val->{type} eq 'boolean') { return $val->{value} ? 'true' : 'false'; }
     if ($val->{type} eq 'symbol')  { return $val->{value}; }
     if ($val->{type} eq 'list') {
-        my @items = map { _value_to_text($_) } @{$val->{items}};
+        my @items = map { _value_to_text($_, $indent) } @{$val->{items}};
         return '[' . join(' ', @items) . ']';
     }
     if ($val->{type} eq 'noun') {
-        return to_text($val, 0);
+        return to_text($val, $indent);
     }
     return '""';
 }

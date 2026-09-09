@@ -50,6 +50,7 @@ NExT is built on two fundamental concepts:
   NOUN         ::= [A-Z] [a-zA-Z0-9_]*
   ADJECTIVE    ::= [a-z] [a-zA-Z0-_-]*
   string       ::= '"' ( any - '"' | '\\"' )* '"'
+  heredoc      ::= '"""' newline ( any )* whitespace? '"""'
   integer      ::= [0-9]+
   float        ::= [0-9]+ '.' [0-9]+
   boolean      ::= 'true' | 'false'
@@ -145,7 +146,17 @@ interpolation, no code. The value types are:
 
 Strings use double quotes. Escape sequences: \\, \", \n, \t.
 Heredocs use triple quotes for multi-line strings. No escaping
-needed inside. The closing """ must be on its own line.
+needed inside. The opening """ must be followed by a newline, and
+the closing """ must be on its own line (possibly indented). This
+enforces visual clarity — heredocs always appear as a distinct block:
+
+  description("""
+  Line 1
+  Line 2
+  Line 3
+  """)
+
+Inline heredocs ("""text""") are not permitted.
 Integers are non-negative (no leading zeros except for "0").
 Floats have exactly one decimal point.
 Booleans are lowercase literals.

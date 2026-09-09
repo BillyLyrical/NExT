@@ -3,7 +3,7 @@ package Data::NExT;
 use strict;
 use warnings;
 
-our $VERSION = '0.5.0';
+our $VERSION = '0.6.0';
 our $ERROR;
 
 my $RE_NOUN  = qr/\G[A-Z][a-zA-Z0-9_]*/;
@@ -130,14 +130,41 @@ sub _read_heredoc {
     my ($self) = @_;
     my $line = $self->{line};
     $self->{pos} += 3; # skip opening """
+    # Require newline after opening """
+    if ($self->{pos} < length($self->{input})) {
+        my $c = $self->_ch;
+        if ($c ne "\n" && $c ne "\r") {
+            $ERROR = "line $self->{line}: heredoc opening \"\"\" must be followed by newline";
+            return undef;
+        }
+        $self->{line}++ if $c eq "\n";
+        $self->{pos}++;
+    }
     my $str = '';
+    my $line_start = 1;
+    my $last_newline_pos = 0;
     while ($self->{pos} < length($self->{input})) {
         my $c = $self->_ch;
         if ($c eq '"' && substr($self->{input}, $self->{pos}, 3) eq '"""') {
+            # Allow closing """ if we're at line start (possibly after whitespace)
+            unless ($line_start) {
+                $ERROR = "line $self->{line}: heredoc closing \"\"\" must be on its own line";
+                return undef;
+            }
+            # Strip the whitespace after last newline (indentation before closing """)
+            $str = substr($str, 0, $last_newline_pos) if $last_newline_pos < length($str);
             $self->{pos} += 3;
             return $str;
         }
-        $self->{line}++ if $c eq "\n";
+        if ($c eq "\n") {
+            $self->{line}++;
+            $line_start = 1;
+            $last_newline_pos = length($str) + 1; # position after the newline
+        } elsif ($c eq ' ' || $c eq "\t") {
+            # Whitespace at line start is OK
+        } else {
+            $line_start = 0;
+        }
         $str .= $c;
         $self->{pos}++;
     }
