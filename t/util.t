@@ -18,15 +18,15 @@ use Data::NExT::Util qw(find find_adj find_first walk
     my $tree = Data::NExT::parse('Agent[ name("a") ] Pipeline[ ] Agent[ name("b") ]');
     my @agents = @{ find($tree, 'Agent') };
     is(scalar @agents, 2, 'find: two Agent nodes');
-    is($agents[0]{Agent}{name}, 'a');
-    is($agents[1]{Agent}{name}, 'b');
+    is($agents[0]{Agent}{_adj}{name}, 'a');
+    is($agents[1]{Agent}{_adj}{name}, 'b');
 }
 
 {
     my $tree = Data::NExT::parse('Outer[ Inner[ val("x") ] ]');
     my @inner = @{ find($tree, 'Inner') };
     is(scalar @inner, 1, 'find nested');
-    is($inner[0]{Inner}{val}, 'x');
+    is($inner[0]{Inner}{_adj}{val}, 'x');
 }
 
 # --- find_adj ---
@@ -61,6 +61,27 @@ use Data::NExT::Util qw(find find_adj find_first walk
     is($miss, undef, 'find_first: returns undef on miss');
 }
 
+# --- find duplicate children ---
+
+{
+    my $tree = Data::NExT::parse('List[ Item[ name("a") ] Item[ name("b") ] Item[ name("c") ] ]');
+    my @items = @{ find($tree, 'Item') };
+    is(scalar @items, 3, 'find: three duplicate Item children');
+    is($items[0]{Item}{_adj}{name}, 'a', 'find: first Item');
+    is($items[1]{Item}{_adj}{name}, 'b', 'find: second Item');
+    is($items[2]{Item}{_adj}{name}, 'c', 'find: third Item');
+}
+
+# --- find_adj duplicate children ---
+
+{
+    my $tree = Data::NExT::parse('List[ Item[ name("a") ] Item[ name("b") ] ]');
+    my @names = @{ find_adj($tree, 'name') };
+    is(scalar @names, 2, 'find_adj: two name adjectives in duplicate children');
+    is($names[0]{value}, 'a');
+    is($names[1]{value}, 'b');
+}
+
 # --- walk ---
 
 {
@@ -69,6 +90,7 @@ use Data::NExT::Util qw(find find_adj find_first walk
     walk($tree, sub {
         my $node = shift;
         for my $key (keys %$node) {
+            next if $key eq '_adj' || $key eq '_children';
             push @noun_keys, $key if ref $node->{$key} eq 'HASH';
         }
     });
@@ -80,8 +102,8 @@ use Data::NExT::Util qw(find find_adj find_first walk
     my @adj_names;
     walk($tree, sub {
         my $node = shift;
-        for my $key (keys %$node) {
-            push @adj_names, $key if ref $node->{$key} ne 'HASH';
+        if (ref $node->{_adj} eq 'HASH') {
+            push @adj_names, keys %{$node->{_adj}};
         }
     });
     is(scalar @adj_names, 2, 'walk visits adjectives');
@@ -92,22 +114,23 @@ use Data::NExT::Util qw(find find_adj find_first walk
 {
     my $tree = Data::NExT::parse('Agent[ name("critic") wit("logic") ]');
     my $h = to_hash($tree->[0]);
-    is($h->{Agent}{name}, 'critic', 'to_hash: string adj');
-    is($h->{Agent}{wit}, 'logic', 'to_hash: second adj');
+    is($h->{Agent}{_adj}{name}, 'critic', 'to_hash: string adj');
+    is($h->{Agent}{_adj}{wit}, 'logic', 'to_hash: second adj');
 }
 
 {
     my $tree = Data::NExT::parse('X[ val(42) flag(true) ]');
     my $h = to_hash($tree->[0]);
-    is($h->{X}{val}, 42, 'to_hash: integer');
-    is($h->{X}{flag}, 1, 'to_hash: boolean');
+    is($h->{X}{_adj}{val}, 42, 'to_hash: integer');
+    is($h->{X}{_adj}{flag}, 1, 'to_hash: boolean');
 }
 
 {
     my $tree = Data::NExT::parse('Outer[ Inner[ val("x") ] ]');
     my $h = to_hash($tree->[0]);
-    is(ref $h->{Outer}{Inner}, 'HASH', 'to_hash: nested noun is hashref');
-    is($h->{Outer}{Inner}{val}, 'x', 'to_hash: nested value');
+    my $inner = $h->{Outer}{_children}[0]{Inner};
+    is(ref $inner, 'HASH', 'to_hash: nested noun is hashref');
+    is($inner->{_adj}{val}, 'x', 'to_hash: nested value');
 }
 
 # --- noun_names ---
@@ -120,6 +143,15 @@ use Data::NExT::Util qw(find find_adj find_first walk
     ok(grep { $_ eq 'B' } @names, 'noun_names: contains B');
     ok(grep { $_ eq 'C' } @names, 'noun_names: contains C');
     ok(grep { $_ eq 'D' } @names, 'noun_names: contains D');
+}
+
+# --- noun_names with duplicate children ---
+
+{
+    my $tree = Data::NExT::parse('List[ Item[ ] Item[ ] Item[ ] ]');
+    my @names = @{ noun_names($tree) };
+    my @items = grep { $_ eq 'Item' } @names;
+    is(scalar @items, 3, 'noun_names: three Item names from duplicates');
 }
 
 # --- to_text roundtrip ---
@@ -141,6 +173,17 @@ use Data::NExT::Util qw(find find_adj find_first walk
     like($text, qr/flag\(true\)/, 'to_text: boolean value');
 }
 
+# --- to_text duplicate children ---
+
+{
+    my $input = "List[\n    Item[ name(\"a\") ]\n    Item[ name(\"b\") ]\n]\n";
+    my $tree = Data::NExT::parse($input);
+    my $text = to_text($tree->[0]);
+    like($text, qr/List\[/, 'to_text: parent present');
+    like($text, qr/name\("a"\)/, 'to_text: first child adj');
+    like($text, qr/name\("b"\)/, 'to_text: second child adj');
+}
+
 # --- tree builder ---
 
 {
@@ -152,8 +195,8 @@ use Data::NExT::Util qw(find find_adj find_first walk
     ]);
     ok(exists $node->{Agent}, 'tree: has Agent key');
     is(ref $node->{Agent}, 'HASH', 'tree: Agent is hashref');
-    is($node->{Agent}{name}, 'critic', 'tree: name value');
-    is($node->{Agent}{wit}, 'logic', 'tree: wit value');
+    is($node->{Agent}{_adj}{name}, 'critic', 'tree: name value');
+    is($node->{Agent}{_adj}{wit}, 'logic', 'tree: wit value');
 }
 
 {
@@ -170,10 +213,9 @@ use Data::NExT::Util qw(find find_adj find_first walk
     ]);
     ok(exists $node->{Pipeline}, 'tree: outer noun');
     my $pipeline = $node->{Pipeline};
-    is(ref $pipeline->{Agent}, 'ARRAY', 'tree: Agent is array');
-    is(scalar @{$pipeline->{Agent}}, 2, 'tree: two nested Agents');
-    is($pipeline->{Agent}[0]{name}, 'a');
-    is($pipeline->{Agent}[1]{name}, 'b');
+    is(scalar @{$pipeline->{_children}}, 2, 'tree: two nested Agents');
+    is($pipeline->{_children}[0]{Agent}{_adj}{name}, 'a');
+    is($pipeline->{_children}[1]{Agent}{_adj}{name}, 'b');
 }
 
 {
@@ -183,7 +225,7 @@ use Data::NExT::Util qw(find find_adj find_first walk
             val  => 42,
         ],
     ]);
-    my $tags = $node->{X}{tags};
+    my $tags = $node->{X}{_adj}{tags};
     is(ref $tags, 'ARRAY', 'tree: list is arrayref');
     is(scalar @$tags, 2, 'tree: two list items');
     is($tags->[0], 'gui', 'tree: list item');
@@ -199,8 +241,16 @@ use Data::NExT::Util qw(find find_adj find_first walk
 
 {
     my $tree = Data::NExT::parse('X[ a("1") b("2") a("3") ]');
-    my @as = @{ where($tree, sub { $_[0]{a} && !ref $_[0]{a} }) };
+    my @as = @{ where($tree, sub { $_[0]{_adj} && $_[0]{_adj}{a} }) };
     is(scalar @as, 1, 'where: one X node with a');
+}
+
+# --- where duplicate children ---
+
+{
+    my $tree = Data::NExT::parse('List[ Item[ name("a") ] Item[ name("b") ] ]');
+    my @items = @{ where($tree, sub { exists $_[0]{Item} }) };
+    is(scalar @items, 2, 'where: two Item nodes in duplicates');
 }
 
 # --- equals ---
@@ -227,6 +277,20 @@ use Data::NExT::Util qw(find find_adj find_first walk
     my $a = Data::NExT::parse('A[ ]')->[0];
     my $b = Data::NExT::parse('B[ ]')->[0];
     ok(!equals($a, $b), 'equals: different names');
+}
+
+# --- equals duplicate children ---
+
+{
+    my $a = Data::NExT::parse('List[ Item[ name("a") ] Item[ name("b") ] ]')->[0];
+    my $b = Data::NExT::parse('List[ Item[ name("a") ] Item[ name("b") ] ]')->[0];
+    ok(equals($a, $b), 'equals: identical duplicate children');
+}
+
+{
+    my $a = Data::NExT::parse('List[ Item[ name("a") ] Item[ name("b") ] ]')->[0];
+    my $b = Data::NExT::parse('List[ Item[ name("a") ] Item[ name("c") ] ]')->[0];
+    ok(!equals($a, $b), 'equals: different duplicate children');
 }
 
 # --- diff ---
@@ -301,8 +365,8 @@ use Data::NExT::Util qw(find find_adj find_first walk
 {
     my $tree = Data::NExT::parse('X[ tags(["gui" "settings"]) ]');
     my $h = to_hash($tree->[0]);
-    is(ref $h->{X}{tags}, 'ARRAY', 'to_hash: list is arrayref');
-    is_deeply($h->{X}{tags}, ['gui', 'settings'], 'to_hash: list values');
+    is(ref $h->{X}{_adj}{tags}, 'ARRAY', 'to_hash: list is arrayref');
+    is_deeply($h->{X}{_adj}{tags}, ['gui', 'settings'], 'to_hash: list values');
 }
 
 # --- tree builder roundtrip ---

@@ -18,6 +18,40 @@ our @EXPORT_OK = qw(
 
 # --- Traversal ---
 
+sub _child_nodes {
+    my ($node) = @_;
+    return () unless ref $node eq 'HASH';
+    my @result;
+    for my $key (keys %$node) {
+        next if $key eq '_adj' || $key eq '_children';
+        my $val = $node->{$key};
+        if (ref $val eq 'HASH') {
+            push @result, $val;
+        }
+    }
+    if (ref $node->{_children} eq 'ARRAY') {
+        for my $child (@{$node->{_children}}) {
+            if (ref $child eq 'HASH') {
+                push @result, $child;
+            }
+        }
+    }
+    return @result;
+}
+
+sub _child_keys {
+    my ($node) = @_;
+    return () unless ref $node eq 'HASH';
+    my @result;
+    for my $key (keys %$node) {
+        next if $key eq '_adj' || $key eq '_children';
+        if (ref $node->{$key} eq 'HASH') {
+            push @result, $key;
+        }
+    }
+    return @result;
+}
+
 sub find {
     my ($nodes, $name) = @_;
     $nodes = [$nodes] unless ref $nodes eq 'ARRAY';
@@ -27,16 +61,8 @@ sub find {
         if (exists $node->{$name}) {
             push @result, $node;
         }
-        for my $val (values %$node) {
-            if (ref $val eq 'HASH') {
-                push @result, @{ find([$val], $name) };
-            } elsif (ref $val eq 'ARRAY') {
-                for my $item (@$val) {
-                    if (ref $item eq 'HASH') {
-                        push @result, @{ find([$item], $name) };
-                    }
-                }
-            }
+        for my $child (_child_nodes($node)) {
+            push @result, @{ find([$child], $name) };
         }
     }
     return \@result;
@@ -48,16 +74,11 @@ sub find_adj {
     my @result;
     for my $node (@$nodes) {
         next unless ref $node eq 'HASH';
-        if (exists $node->{$name}) {
-            my $val = $node->{$name};
-            unless (ref $val eq 'HASH' && exists $val->{type}) {
-                push @result, { name => $name, value => $val };
-            }
+        if (ref $node->{_adj} eq 'HASH' && exists $node->{_adj}{$name}) {
+            push @result, { name => $name, value => $node->{_adj}{$name} };
         }
-        for my $val (values %$node) {
-            if (ref $val eq 'HASH') {
-                push @result, @{ find_adj([$val], $name) };
-            }
+        for my $child (_child_nodes($node)) {
+            push @result, @{ find_adj([$child], $name) };
         }
     }
     return \@result;
@@ -71,11 +92,9 @@ sub find_first {
         if (exists $node->{$name}) {
             return $node;
         }
-        for my $val (values %$node) {
-            if (ref $val eq 'HASH') {
-                my $found = find_first([$val], $name);
-                return $found if $found;
-            }
+        for my $child (_child_nodes($node)) {
+            my $found = find_first([$child], $name);
+            return $found if $found;
         }
     }
     return undef;
@@ -87,10 +106,8 @@ sub walk {
     for my $node (@$nodes) {
         next unless ref $node eq 'HASH';
         $callback->($node);
-        for my $val (values %$node) {
-            if (ref $val eq 'HASH') {
-                walk([$val], $callback);
-            }
+        for my $child (_child_nodes($node)) {
+            walk([$child], $callback);
         }
     }
 }
@@ -109,11 +126,12 @@ sub noun_names {
     my @names;
     for my $node (@$nodes) {
         next unless ref $node eq 'HASH';
-        for my $key (keys %$node) {
-            if (ref $node->{$key} eq 'HASH') {
-                push @names, $key;
-                push @names, @{ noun_names([$node->{$key}]) };
-            }
+        for my $key (_child_keys($node)) {
+            push @names, $key;
+            push @names, @{ noun_names([$node->{$key}]) };
+        }
+        if (ref $node->{_children} eq 'ARRAY') {
+            push @names, @{ noun_names($node->{_children}) };
         }
     }
     return \@names;
@@ -127,15 +145,28 @@ sub to_text {
     my $pad = '    ' x $indent;
     my $text = '';
 
-    for my $key (keys %$node) {
+    for my $key (_child_keys($node)) {
         my $val = $node->{$key};
         if (ref $val eq 'HASH') {
             $text .= "${pad}${key}[\n";
             $text .= to_text($val, $indent + 1);
             $text .= "${pad}]\n";
-        } else {
-            my $val_text = _value_to_text($val, $indent);
-            $text .= "${pad}${key}(${val_text})\n";
+        }
+    }
+
+    if (ref $node->{_adj} eq 'HASH') {
+        for my $k (sort keys %{$node->{_adj}}) {
+            my $v = $node->{_adj}{$k};
+            my $val_text = _value_to_text($v, $indent);
+            $text .= "${pad}${k}(${val_text})\n";
+        }
+    }
+
+    if (ref $node->{_children} eq 'ARRAY') {
+        for my $child (@{$node->{_children}}) {
+            if (ref $child eq 'HASH') {
+                $text .= to_text($child, $indent);
+            }
         }
     }
 
@@ -213,7 +244,8 @@ sub _build_node {
     my ($key, $val) = @$spec;
 
     if (ref $val eq 'ARRAY') {
-        my %content;
+        my %adjectives;
+        my @children;
         my @items = @$val;
         while (@items) {
             my $k = shift @items;
@@ -221,31 +253,24 @@ sub _build_node {
             if ($k =~ /^[A-Z]/) {
                 my $built = _build_node([$k, $v]);
                 my ($built_key, $built_val) = %$built;
-                if (exists $content{$k}) {
-                    if (ref $content{$k} eq 'ARRAY') {
-                        push @{$content{$k}}, $built_val;
+                my ($child_key) = keys %$built;
+                if (exists $adjectives{$k}) {
+                    if (ref $adjectives{$k} eq 'ARRAY') {
+                        push @{$adjectives{$k}}, $built_val;
                     } else {
-                        $content{$k} = [$content{$k}, $built_val];
+                        $adjectives{$k} = [$adjectives{$k}, $built_val];
                     }
                 } else {
-                    $content{$k} = $built_val;
+                    push @children, $built;
                 }
             } else {
-                if (exists $content{$k}) {
-                    if (ref $content{$k} eq 'ARRAY') {
-                        push @{$content{$k}}, _build_value($v);
-                    } else {
-                        $content{$k} = [$content{$k}, _build_value($v)];
-                    }
-                } else {
-                    $content{$k} = _build_value($v);
-                }
+                $adjectives{$k} = _build_value($v);
             }
         }
-        return { $key => \%content };
+        return { $key => { _adj => \%adjectives, _children => \@children } };
     }
 
-    return { $key => _build_value($val) };
+    return { $key => { _adj => {}, _children => [_build_value($val)] } };
 }
 
 sub _build_value {
@@ -254,21 +279,20 @@ sub _build_value {
     if (ref $val eq 'ARRAY') {
         my @items = @$val;
         if (@items && !ref $items[0] && $items[0] =~ /^[A-Z]/) {
-            my %content;
+            my %adjectives;
+            my @children;
             while (@items) {
                 my $k = shift @items;
                 my $v = shift @items;
-                if (exists $content{$k}) {
-                    if (ref $content{$k} eq 'ARRAY') {
-                        push @{$content{$k}}, _build_value($v);
-                    } else {
-                        $content{$k} = [$content{$k}, _build_value($v)];
-                    }
+                if ($k =~ /^[A-Z]/) {
+                    my $built = _build_node([$k, $v]);
+                    push @children, $built;
                 } else {
-                    $content{$k} = _build_value($v);
+                    $adjectives{$k} = _build_value($v);
                 }
             }
-            return \%content;
+            my $noun = $items[0];
+            return { _adj => \%adjectives, _children => \@children };
         }
         return $val;
     }
@@ -289,10 +313,8 @@ sub where {
     for my $node (@$nodes) {
         next unless ref $node eq 'HASH';
         push @result, $node if $predicate->($node);
-        for my $val (values %$node) {
-            if (ref $val eq 'HASH') {
-                push @result, @{ where([$val], $predicate) };
-            }
+        for my $child (_child_nodes($node)) {
+            push @result, @{ where([$child], $predicate) };
         }
     }
     return \@result;
@@ -400,15 +422,25 @@ sub _diff_val {
 sub require_adj {
     my ($node, $name) = @_;
     die "require_adj: not a hashref\n" unless ref $node eq 'HASH';
-    die "required adjective '$name' missing\n" unless exists $node->{$name};
+    my $adj = $node->{_adj};
+    die "required adjective '$name' missing\n" unless ref $adj eq 'HASH' && exists $adj->{$name};
     return 1;
 }
 
 sub require_child {
     my ($node, $name) = @_;
     die "require_child: not a hashref\n" unless ref $node eq 'HASH';
-    die "required child '$name' missing\n" unless exists $node->{$name} && ref $node->{$name} eq 'HASH';
-    return 1;
+    if (exists $node->{$name} && ref $node->{$name} eq 'HASH') {
+        return 1;
+    }
+    if (ref $node->{_children} eq 'ARRAY') {
+        for my $child (@{$node->{_children}}) {
+            if (ref $child eq 'HASH' && exists $child->{$name}) {
+                return 1;
+            }
+        }
+    }
+    die "required child '$name' missing\n";
 }
 
 sub validate {
@@ -429,17 +461,8 @@ sub _validate_node {
         return;
     }
 
-    for my $key (keys %$node) {
-        my $val = $node->{$key};
-        if (ref $val eq 'HASH') {
-            _validate_node($val, $errors, $depth + 1, $max_depth);
-        } elsif (ref $val eq 'ARRAY') {
-            for my $item (@$val) {
-                if (ref $item eq 'HASH') {
-                    _validate_node($item, $errors, $depth + 1, $max_depth);
-                }
-            }
-        }
+    for my $child (_child_nodes($node)) {
+        _validate_node($child, $errors, $depth + 1, $max_depth);
     }
 }
 
@@ -471,18 +494,19 @@ sub _collect_symbols {
     for my $node (@$nodes) {
         next unless ref $node eq 'HASH';
 
-        for my $key (keys %$node) {
-            my $val = $node->{$key};
-
-            if (!ref $val && defined $val && $val =~ /^@(.+)/) {
-                my $name = $1;
-                $counts->{$name} //= { count => 0, line => $line };
-                $counts->{$name}{count}++;
-            } elsif (ref $val eq 'HASH') {
-                _collect_symbols([$val], $counts, $line);
-            } elsif (ref $val eq 'ARRAY') {
-                _collect_symbols($val, $counts, $line);
+        if (ref $node->{_adj} eq 'HASH') {
+            for my $key (keys %{$node->{_adj}}) {
+                my $val = $node->{_adj}{$key};
+                if (!ref $val && defined $val && $val =~ /^@(.+)/) {
+                    my $name = $1;
+                    $counts->{$name} //= { count => 0, line => $line };
+                    $counts->{$name}{count}++;
+                }
             }
+        }
+
+        for my $child (_child_nodes($node)) {
+            _collect_symbols([$child], $counts, $line);
         }
     }
 }
@@ -525,6 +549,12 @@ Data::NExT::Util provides optional utility functions for traversing,
 querying, building, and comparing NExT parse trees. The core parser
 (Data::NExT) works fine without this module - Util is a convenience
 layer for common operations.
+
+B<Important:> Parse trees use an internal structure with C<_adj> and
+C<_children> keys. Do not access these directly. Use the functions
+provided by this module (C<find>, C<find_adj>, C<walk>, C<to_text>, etc.)
+to traverse and query trees. Direct access to internal fields may break
+across versions.
 
 =head1 FUNCTIONS
 

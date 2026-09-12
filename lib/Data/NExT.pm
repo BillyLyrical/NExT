@@ -291,22 +291,22 @@ sub _parse_object {
     my ($self) = @_;
     my $noun = $self->_read_noun;
     return undef unless $self->_expect('[');
-    my %content;
+    my %adjectives;
+    my @children;
     while (1) {
         my $tok = $self->_peek;
         last if $tok eq ']' || $tok eq 'EOF';
         if ($tok eq 'NOUN') {
             my $child = $self->_parse_object;
             return undef unless defined $child;
-            my ($child_key) = keys %$child;
-            $content{$child_key} = $child->{$child_key};
+            push @children, $child;
         } elsif ($tok eq 'ADJ') {
             my $adj = $self->_read_adj;
             unless ($self->_expect('(')) { return undef; }
             my $val = $self->_parse_value;
             return undef unless defined $val;
             unless ($self->_expect(')')) { return undef; }
-            $content{$adj->{name}} = $val;
+            $adjectives{$adj->{name}} = $val;
         } elsif ($tok eq '#') {
             $self->_skip_ws;
         } else {
@@ -315,7 +315,7 @@ sub _parse_object {
         }
     }
     return undef unless $self->_expect(']');
-    return { $noun->{name} => \%content };
+    return { $noun->{name} => { _adj => \%adjectives, _children => \@children } };
 }
 
 sub parse {
