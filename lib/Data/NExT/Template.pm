@@ -3,7 +3,7 @@ package Data::NExT::Template;
 use strict;
 use warnings;
 
-our $VERSION = '0.1.0';
+our $VERSION = '0.7.0';
 
 sub new {
     my ($class, %opts) = @_;

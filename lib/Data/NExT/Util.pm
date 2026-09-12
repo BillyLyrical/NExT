@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use Exporter 'import';
 
-our $VERSION = '0.2.0';
+our $VERSION = '0.7.0';
 
 our @EXPORT_OK = qw(
     find find_adj find_first walk
